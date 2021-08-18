@@ -17,13 +17,13 @@ func (f fsFunc) Open(name string) (fs.File, error) {
 	return f(name)
 }
 
-func staticFileHandler(prefix, root string) http.Handler {
+func staticFileHandler() http.Handler {
 	handler := fsFunc(func(name string) (fs.File, error) {
-		f, err := staticFiles.Open(path.Join(root, name))
+		f, err := staticFiles.Open(path.Join("web", name))
 		if os.IsNotExist(err) {
-			return staticFiles.Open(root + "/index.html")
+			return staticFiles.Open("web/index.html")
 		}
 		return f, err
 	})
-	return http.StripPrefix(prefix, http.FileServer(http.FS(handler)))
+	return http.StripPrefix("/", http.FileServer(http.FS(handler)))
 }

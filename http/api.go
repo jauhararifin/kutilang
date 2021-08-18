@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gorilla/mux"
+
 	"github.com/jauhararifin/kutilang/patient"
 )
 
@@ -13,12 +15,11 @@ type handler struct {
 }
 
 func (h *handler) Start(addr string) error {
-	server := http.NewServeMux()
+	router := mux.NewRouter()
+	router.HandleFunc("/api/v1/patients/", h.handleInsertPatient).Methods("POST")
+	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
-	server.HandleFunc("/api/v1/patients/", h.handleInsertPatient)
-	server.Handle("/", staticFileHandler("/", "web"))
-
-	return http.ListenAndServe(addr, server)
+	return http.ListenAndServe(addr, router)
 }
 
 func (h *handler) handleInsertPatient(w http.ResponseWriter, req *http.Request) {
