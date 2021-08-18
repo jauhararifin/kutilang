@@ -14,7 +14,9 @@ type handler struct {
 
 func (h *handler) Start(addr string) error {
 	server := http.NewServeMux()
+
 	server.HandleFunc("/api/v1/patients/", h.handleInsertPatient)
+	server.Handle("/", staticFileHandler("/", "web"))
 
 	return http.ListenAndServe(addr, server)
 }
