@@ -2,10 +2,12 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
-	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/jauhararifin/kutilang/log"
@@ -15,7 +17,7 @@ import (
 // TODO (jauhararifin): make prepare statement once.
 type db struct {
 	logger      log.Log
-	conn        *sqlx.DB
+	conn        *sql.DB
 	m           *sync.Mutex
 	initialized bool
 }
@@ -26,7 +28,7 @@ func NewDB(logger log.Log) (*db, error) {
 		return nil, fmt.Errorf("cannot prepare sqlite file: %w", err)
 	}
 
-	conn, err := sqlx.Connect("sqlite3", sqlitePath)
+	conn, err := sql.Open("sqlite3", sqlitePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to sqlite3: %w", err)
 	}
@@ -44,13 +46,13 @@ func (d *db) InsertPatient(ctx context.Context, patient patient.Profile, keyword
 		return fmt.Errorf("cannot init table: %w", err)
 	}
 
-	tx, err := d.conn.Beginx()
+	tx, err := d.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("cannot begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PreparexContext(ctx, insertPatientSQL)
+	stmt, err := tx.PrepareContext(ctx, insertPatientSQL)
 	if err != nil {
 		return fmt.Errorf("cannot prepare insert statement: %w", err)
 	}
@@ -64,11 +66,12 @@ func (d *db) InsertPatient(ctx context.Context, patient patient.Profile, keyword
 		patient.Birthdate,
 		patient.Address,
 		patient.LastVisit.Unix(),
+		false,
 	); err != nil {
 		return fmt.Errorf("cannot execute insert statement: %w", err)
 	}
 
-	indexStmt, err := tx.PreparexContext(ctx, insertIndexSQL)
+	indexStmt, err := tx.PrepareContext(ctx, insertIndexSQL)
 	if err != nil {
 		return fmt.Errorf("cannot prepare insert index statement: %w", err)
 	}
@@ -102,6 +105,45 @@ func (d *db) init(ctx context.Context) error {
 	return nil
 }
 
+func (d *db) GetPatient(ctx context.Context, patientID string) (patient.Profile, error) {
+	if err := d.init(ctx); err != nil {
+		return patient.Profile{}, fmt.Errorf("cannot init table: %w", err)
+	}
+
+	row := d.conn.QueryRowContext(ctx, getPatientSQL, patientID)
+	if row.Err() != nil {
+		return patient.Profile{}, fmt.Errorf("cannot query patients table: %w", row.Err())
+	}
+
+	result, err := d.scanPatient(row)
+	if err != nil {
+		return patient.Profile{}, fmt.Errorf("cannot scan patient from db: %w", err)
+	}
+
+	return result, nil
+}
+
+func (d *db) scanPatient(row *sql.Row) (patient.Profile, error) {
+	result := patient.Profile{}
+	lastVisitUnix := int32(0)
+	if err := row.Scan(
+		&result.ID,
+		&result.Name,
+		&result.HeadFamilyName,
+		&result.Birthdate,
+		&result.Address,
+		&lastVisitUnix,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return patient.Profile{}, fmt.Errorf("patient does not exist")
+		}
+		return patient.Profile{}, err
+	}
+	result.LastVisit = time.Unix(int64(lastVisitUnix), 0)
+
+	return result, nil
+}
+
 func (d *db) SearchPatient(
 	ctx context.Context,
 	query string,
@@ -115,13 +157,13 @@ func (d *db) UpdatePatient(ctx context.Context, patient patient.Profile, keyword
 		return fmt.Errorf("cannot init table: %w", err)
 	}
 
-	tx, err := d.conn.Beginx()
+	tx, err := d.conn.Begin()
 	if err != nil {
 		return fmt.Errorf("cannot begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	updateStmt, err := tx.PreparexContext(ctx, updatePatientSQL)
+	updateStmt, err := tx.PrepareContext(ctx, updatePatientSQL)
 	if err != nil {
 		return fmt.Errorf("cannot prepare update statement: %w", err)
 	}
@@ -147,7 +189,7 @@ func (d *db) UpdatePatient(ctx context.Context, patient patient.Profile, keyword
 		return fmt.Errorf("patient is not found")
 	}
 
-	indexDeleteStmt, err := tx.PreparexContext(ctx, deleteIndexSQL)
+	indexDeleteStmt, err := tx.PrepareContext(ctx, deleteIndexSQL)
 	if err != nil {
 		return fmt.Errorf("cannot prepare update index statement: %w", err)
 	}
@@ -157,7 +199,7 @@ func (d *db) UpdatePatient(ctx context.Context, patient patient.Profile, keyword
 		return fmt.Errorf("cannot execute delete statement: %w", err)
 	}
 
-	indexStmt, err := tx.PreparexContext(ctx, insertIndexSQL)
+	indexStmt, err := tx.PrepareContext(ctx, insertIndexSQL)
 	if err != nil {
 		return fmt.Errorf("cannot prepare update index statement: %w", err)
 	}

@@ -23,6 +23,13 @@ sqlite3 ~/.config/kutilang/db.sqlite3 "SELECT * FROM patients"
 echo index table:
 sqlite3 ~/.config/kutilang/db.sqlite3 "SELECT * FROM patient_indices"
 
+# ====================================== get patient ===============================================
+
+echo
+echo Get patient
+curl -L "http://localhost:5000/api/v1/patients/$PATIENT1_ID" 
+curl -L "http://localhost:5000/api/v1/patients/somerandomid" 
+
 # ====================================== invalid birth date =========================================
 
 echo

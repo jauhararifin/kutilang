@@ -15,6 +15,7 @@ import (
 
 type Storage interface {
 	InsertPatient(ctx context.Context, patient patient.Profile, keywords []string) error
+	GetPatient(ctx context.Context, patientID string) (patient.Profile, error)
 	UpdatePatient(ctx context.Context, patient patient.Profile, keywords []string) error
 }
 
@@ -61,7 +62,7 @@ func (c *controller) generateID() string {
 }
 
 func (c *controller) generateKeywords(patient patient.Profile) []string {
-	words := strings.Split(patient.Name + " " + patient.HeadFamilyName, " ")
+	words := strings.Split(patient.Name+" "+patient.HeadFamilyName, " ")
 	keywordMap := make(map[string]struct{})
 	for _, word := range words {
 		if len(word) == 0 {
@@ -77,6 +78,19 @@ func (c *controller) generateKeywords(patient patient.Profile) []string {
 
 	sort.Strings(keywords)
 	return keywords
+}
+
+func (c *controller) GetPatient(ctx context.Context, patientID string) (patient.Profile, error) {
+	if patientID == "" {
+		return patient.Profile{}, fmt.Errorf("inavlid patient id")
+	}
+	
+	result, err := c.storage.GetPatient(ctx, patientID)
+	if err != nil {
+		return patient.Profile{}, fmt.Errorf("cannot get patient: %w", err)
+	}
+
+	return result, nil
 }
 
 func (c *controller) SearchPatient(ctx context.Context, query string, option patient.SearchOption) (patient.SearchResult, error) {

@@ -8,8 +8,8 @@ import (
 type Profile struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
-	Birthdate      string    `json:"birthDate"`
 	HeadFamilyName string    `json:"headFamilyName"`
+	Birthdate      string    `json:"birthDate"`
 	Address        string    `json:"address"`
 	LastVisit      time.Time `json:"lastVisit"`
 }
@@ -42,6 +42,7 @@ type VisitQueryResult struct {
 
 type Service interface {
 	InsertPatient(ctx context.Context, patient Profile) (Profile, error)
+	GetPatient(ctx context.Context, patientID string) (Profile, error)
 	SearchPatient(ctx context.Context, query string, option SearchOption) (SearchResult, error)
 	UpdatePatient(ctx context.Context, patient Profile) error
 	DeletePatient(ctx context.Context, patientID string) error

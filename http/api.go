@@ -19,6 +19,7 @@ type handler struct {
 func (h *handler) Start(addr string) error {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/v1/patients/", h.handleInsertPatient).Methods("POST")
+	router.HandleFunc("/api/v1/patients/{patientID}", h.handleGetPatient).Methods("GET")
 	router.HandleFunc("/api/v1/patients/{patientID}", h.handleUpdatePatient).Methods("PUT")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 	
@@ -65,6 +66,18 @@ func (h *handler) writeResult(w http.ResponseWriter, result interface{}, err err
 
 	// TODO (jauhararifin): log the error here.
 	json.NewEncoder(w).Encode(res)
+}
+
+func (h *handler) handleGetPatient(w http.ResponseWriter, req *http.Request) {
+	patientID := mux.Vars(req)["patientID"]
+
+	patient, err := h.service.GetPatient(req.Context(), patientID)
+	if err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot get patient: %w", err))
+		return
+	}
+
+	h.writeResult(w, patient, nil)
 }
 
 func (h *handler) handleUpdatePatient(w http.ResponseWriter, req *http.Request) {
