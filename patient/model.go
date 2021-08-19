@@ -8,7 +8,7 @@ import (
 type Profile struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
-	Birthdate      time.Time `json:"birthDate"`
+	Birthdate      string    `json:"birthDate"`
 	HeadFamilyName string    `json:"headFamilyName"`
 	Address        string    `json:"address"`
 	LastVisit      time.Time `json:"lastVisit"`

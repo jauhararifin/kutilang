@@ -9,42 +9,50 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jauhararifin/kutilang/log"
 	"github.com/jauhararifin/kutilang/patient"
 )
 
 type Storage interface {
 	InsertPatient(ctx context.Context, patient patient.Profile, keywords []string) error
+	UpdatePatient(ctx context.Context, patient patient.Profile, keywords []string) error
 }
 
 type controller struct {
 	storage Storage
+	logger  log.Log
 }
 
 func (c *controller) InsertPatient(ctx context.Context, profile patient.Profile) (patient.Profile, error) {
-	if err := c.validatePatient(profile); err != nil {
+	if err := c.validatePatient(&profile); err != nil {
 		return patient.Profile{}, fmt.Errorf("invalid patient info: %w", err)
 	}
 
 	profile.ID = c.generateID()
 	profile.LastVisit = time.Now()
+
 	keywords := c.generateKeywords(profile)
 	if err := c.storage.InsertPatient(ctx, profile, keywords); err != nil {
 		return patient.Profile{}, fmt.Errorf("cannot insert patient: %w", err)
 	}
 
 	profile.LastVisit = profile.LastVisit.Local()
-	profile.Birthdate = profile.Birthdate.Local()
 	return profile, nil
 }
 
 // TODO (jauhararifin): make better validation
-func (c *controller) validatePatient(patient patient.Profile) error {
+func (c *controller) validatePatient(patient *patient.Profile) error {
 	if strings.TrimSpace(patient.Name) == "" {
 		return fmt.Errorf("missing patient name")
 	}
 	if strings.TrimSpace(patient.Address) == "" {
 		return fmt.Errorf("missing patient address")
 	}
+	birthDate, err := parseDate(patient.Birthdate)
+	if err != nil {
+		return fmt.Errorf("invalid birthdate: %w", err)
+	}
+	patient.Birthdate = birthDate
 	return nil
 }
 
@@ -53,7 +61,7 @@ func (c *controller) generateID() string {
 }
 
 func (c *controller) generateKeywords(patient patient.Profile) []string {
-	words := strings.Split(patient.Name, " ")
+	words := strings.Split(patient.Name + " " + patient.HeadFamilyName, " ")
 	keywordMap := make(map[string]struct{})
 	for _, word := range words {
 		if len(word) == 0 {
@@ -76,7 +84,20 @@ func (c *controller) SearchPatient(ctx context.Context, query string, option pat
 }
 
 func (c *controller) UpdatePatient(ctx context.Context, patient patient.Profile) error {
-	panic("impl")
+	if err := c.validatePatient(&patient); err != nil {
+		return fmt.Errorf("invalid patient info: %w", err)
+	}
+
+	if patient.ID == "" {
+		return fmt.Errorf("missing patient id")
+	}
+
+	keywords := c.generateKeywords(patient)
+	if err := c.storage.UpdatePatient(ctx, patient, keywords); err != nil {
+		return fmt.Errorf("cannot update patient: %w", err)
+	}
+
+	return nil
 }
 
 func (c *controller) DeletePatient(ctx context.Context, patientID string) error {
@@ -99,6 +120,6 @@ func (c *controller) UpdatePatientVisit(ctx context.Context, patientVisit patien
 	panic("impl")
 }
 
-func NewController(storage Storage) *controller {
-	return &controller{storage: storage}
+func NewController(storage Storage, logger log.Log) *controller {
+	return &controller{storage: storage, logger: logger}
 }
