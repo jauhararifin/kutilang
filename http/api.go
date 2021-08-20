@@ -13,16 +13,17 @@ import (
 
 type handler struct {
 	service patient.Service
-	logger log.Log
+	logger  log.Log
 }
 
 func (h *handler) Start(addr string) error {
 	router := mux.NewRouter()
-	router.HandleFunc("/api/v1/patients/", h.handleInsertPatient).Methods("POST")
-	router.HandleFunc("/api/v1/patients/{patientID}", h.handleGetPatient).Methods("GET")
-	router.HandleFunc("/api/v1/patients/{patientID}", h.handleUpdatePatient).Methods("PUT")
+	router.Path("/api/v1/patients/").HandlerFunc(h.handleInsertPatient).Methods("POST")
+	router.Path("/api/v1/search/").HandlerFunc(h.handleSearchPatient).Methods("GET")//.Queries("q", "{q}", "cursor", "{cursor}")
+	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleGetPatient).Methods("GET")
+	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleUpdatePatient).Methods("PUT")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
-	
+
 	router.Use(log.NewMiddleware(h.logger))
 
 	return http.ListenAndServe(addr, router)
@@ -66,6 +67,19 @@ func (h *handler) writeResult(w http.ResponseWriter, result interface{}, err err
 
 	// TODO (jauhararifin): log the error here.
 	json.NewEncoder(w).Encode(res)
+}
+
+func (h *handler) handleSearchPatient(w http.ResponseWriter, req *http.Request) {
+	query := req.FormValue("q")
+	cursor := req.FormValue("cursor")
+
+	result, err := h.service.SearchPatient(req.Context(), query, patient.SearchOption{Cursor: cursor, BatchSize: 30})
+	if err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot search patient: %w", err))
+		return
+	}
+
+	h.writeResult(w, result, nil)
 }
 
 func (h *handler) handleGetPatient(w http.ResponseWriter, req *http.Request) {

@@ -20,6 +20,7 @@ type SearchResult struct {
 }
 
 type SearchOption struct {
+	Cursor    string
 	BatchSize int
 }
 

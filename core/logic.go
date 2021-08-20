@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,13 @@ type Storage interface {
 	InsertPatient(ctx context.Context, patient patient.Profile, keywords []string) error
 	GetPatient(ctx context.Context, patientID string) (patient.Profile, error)
 	UpdatePatient(ctx context.Context, patient patient.Profile, keywords []string) error
+	SearchPatient(
+		ctx context.Context,
+		keywords []string,
+		lastVisit time.Time,
+		lastPatientID string,
+		batchSize int,
+	) ([]patient.Profile, error)
 }
 
 type controller struct {
@@ -84,7 +92,7 @@ func (c *controller) GetPatient(ctx context.Context, patientID string) (patient.
 	if patientID == "" {
 		return patient.Profile{}, fmt.Errorf("inavlid patient id")
 	}
-	
+
 	result, err := c.storage.GetPatient(ctx, patientID)
 	if err != nil {
 		return patient.Profile{}, fmt.Errorf("cannot get patient: %w", err)
@@ -94,7 +102,74 @@ func (c *controller) GetPatient(ctx context.Context, patientID string) (patient.
 }
 
 func (c *controller) SearchPatient(ctx context.Context, query string, option patient.SearchOption) (patient.SearchResult, error) {
-	panic("impl")
+	keywords := c.getKeywordsFromQuery(query)
+	if len(keywords) == 0 {
+		return patient.SearchResult{}, fmt.Errorf("invalid search query")
+	}
+	if len(keywords) > 30 {
+		return patient.SearchResult{}, fmt.Errorf("search query is too long")
+	}
+	if option.BatchSize > 30 {
+		return patient.SearchResult{}, fmt.Errorf("batch is maximum at 30")
+	}
+	if option.BatchSize < 1 {
+		option.BatchSize = 1
+	}
+	lastVisit, lastPatientID, err := c.parseCursor(option.Cursor)
+	if err != nil {
+		return patient.SearchResult{}, fmt.Errorf("invalid cursor: %w", err)
+	}
+
+	patients, err := c.storage.SearchPatient(ctx, keywords, lastVisit, lastPatientID, option.BatchSize)
+	if err != nil {
+		return patient.SearchResult{}, err
+	}
+
+	result := patient.SearchResult{Results: patients}
+	if len(patients) >= option.BatchSize {
+		lastEntry := patients[len(patients)-1]
+		result.NextCursor = c.buildCursor(strconv.FormatInt(lastEntry.LastVisit.Unix(), 10), lastEntry.ID)
+	}
+
+	return result, nil
+}
+
+func (c *controller) getKeywordsFromQuery(query string) []string {
+	keywordMap := make(map[string]struct{})
+	for _, keyword := range strings.Split(strings.ToLower(query), " ") {
+		keyword = strings.TrimSpace(keyword)
+		if len(keyword) > 0 {
+			keywordMap[keyword] = struct{}{}
+		}
+	}
+
+	keywords := make([]string, 0, len(keywordMap))
+	for keyword := range keywordMap {
+		keywords = append(keywords, keyword)
+	}
+
+	return keywords
+}
+
+func (c *controller) parseCursor(cursor string) (lastVisit time.Time, lastaPatientID string, err error) {
+	if cursor == "" {
+		return time.Unix(0, 0), "", nil
+	}
+
+	parts := strings.Split(cursor, ".")
+	if len(cursor) != 2 {
+		return time.Time{}, "", fmt.Errorf("invalid format")
+	}
+	lastVisitTs, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid format: %w", err)
+	}
+
+	return time.Unix(lastVisitTs, 0), parts[1], nil
+}
+
+func (c *controller) buildCursor(lastVisit, lastPatientID string) string {
+	return lastVisit + "." + lastPatientID
 }
 
 func (c *controller) UpdatePatient(ctx context.Context, patient patient.Profile) error {

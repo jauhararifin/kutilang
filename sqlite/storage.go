@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,7 +125,11 @@ func (d *db) GetPatient(ctx context.Context, patientID string) (patient.Profile,
 	return result, nil
 }
 
-func (d *db) scanPatient(row *sql.Row) (patient.Profile, error) {
+type scanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func (d *db) scanPatient(row scanner) (patient.Profile, error) {
 	result := patient.Profile{}
 	lastVisitUnix := int32(0)
 	if err := row.Scan(
@@ -146,10 +152,42 @@ func (d *db) scanPatient(row *sql.Row) (patient.Profile, error) {
 
 func (d *db) SearchPatient(
 	ctx context.Context,
-	query string,
-	option patient.SearchOption,
-) (patient.SearchResult, error) {
-	panic("impl")
+	keywords []string,
+	lastVisit time.Time,
+	lastPatientID string,
+	batchSize int,
+) ([]patient.Profile, error) {
+	if len(keywords) == 0 {
+		return nil, fmt.Errorf("empty keyword")
+	}
+	if err := d.init(ctx); err != nil {
+		return nil, fmt.Errorf("cannot init table: %w", err)
+	}
+	lastVisitTs := strconv.FormatInt(lastVisit.Unix(), 10)
+
+	sql := fmt.Sprintf(searchSQL, "(?"+strings.Repeat(",?", len(keywords)-1)+")")
+	args := make([]interface{}, 0, len(keywords)+4)
+	args = append(args, lastVisitTs, lastVisitTs, lastPatientID)
+	for _, keyword := range keywords {
+		args = append(args, keyword)
+	}
+	args = append(args, batchSize)
+	rows, err := d.conn.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("cannot query search sql: %w", err)
+	}
+	defer rows.Close()
+
+	patients := make([]patient.Profile, 0)
+	for rows.Next() {
+		pat, err := d.scanPatient(rows)
+		if err != nil {
+			return nil, fmt.Errorf("cannot scan patient from db: %w", err)
+		}
+		patients = append(patients, pat)
+	}
+
+	return patients, nil
 }
 
 func (d *db) UpdatePatient(ctx context.Context, patient patient.Profile, keywords []string) error {
