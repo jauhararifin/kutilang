@@ -70,3 +70,6 @@ sqlite3 ~/.config/kutilang/db.sqlite3 "SELECT * FROM patients"
 echo index table:
 sqlite3 ~/.config/kutilang/db.sqlite3 "SELECT * FROM patient_indices"
 
+# ====================================== search patient =========================================
+
+./scripts/fixtures.sh
