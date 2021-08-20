@@ -40,11 +40,19 @@ const updatePatientSQL = "UPDATE patients SET name=?, head_family_name=?, birth_
 
 const deleteIndexSQL = "DELETE FROM patient_indices WHERE patient_id = ?"
 
+const deletePatientSQL = "DELETE FROM patients WHERE id = ?"
+
 const searchSQL = `
-SELECT patients.id, patients.name, patients.head_family_name, patients.birth_date, patients.address, patients.last_visit
-FROM patient_indices JOIN patients
-ON patient_indices.patient_id = patients.id
-WHERE (patient_indices.last_visit > ? OR patient_indices.last_visit = ? AND patient_indices.patient_id > ?) AND patients.is_deleted = false AND patient_indices.keyword in %s
+SELECT
+	patients.id, patients.name, patients.head_family_name, patients.birth_date, patients.address, patients.last_visit
+FROM
+	patient_indices JOIN patients
+ON
+	patient_indices.patient_id = patients.id
+WHERE 
+	(patient_indices.last_visit > ? OR patient_indices.last_visit = ? AND patient_indices.patient_id > ?) AND patients.is_deleted = false AND patient_indices.keyword in %s
 GROUP BY patients.id
-ORDER BY patient_indices.last_visit, patient_indices.patient_id DESC LIMIT ?
+ORDER BY 
+	patient_indices.last_visit, patient_indices.patient_id
+DESC LIMIT ?
 `

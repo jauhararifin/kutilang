@@ -19,9 +19,10 @@ type handler struct {
 func (h *handler) Start(addr string) error {
 	router := mux.NewRouter()
 	router.Path("/api/v1/patients/").HandlerFunc(h.handleInsertPatient).Methods("POST")
-	router.Path("/api/v1/search/").HandlerFunc(h.handleSearchPatient).Methods("GET")//.Queries("q", "{q}", "cursor", "{cursor}")
+	router.Path("/api/v1/search/").HandlerFunc(h.handleSearchPatient).Methods("GET") //.Queries("q", "{q}", "cursor", "{cursor}")
 	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleGetPatient).Methods("GET")
 	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleUpdatePatient).Methods("PUT")
+	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleDeletePatient).Methods("DELETE")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
 	router.Use(log.NewMiddleware(h.logger))
@@ -106,6 +107,18 @@ func (h *handler) handleUpdatePatient(w http.ResponseWriter, req *http.Request) 
 	err := h.service.UpdatePatient(req.Context(), patientProfile)
 	if err != nil {
 		h.writeResult(w, nil, fmt.Errorf("cannot insert patient: %w", err))
+		return
+	}
+
+	h.writeResult(w, nil, nil)
+}
+
+func (h *handler) handleDeletePatient(w http.ResponseWriter, req *http.Request) {
+	patientID := mux.Vars(req)["patientID"]
+
+	err := h.service.DeletePatient(req.Context(), patientID)
+	if err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot delete patient: %w", err))
 		return
 	}
 

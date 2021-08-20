@@ -25,6 +25,7 @@ type Storage interface {
 		lastPatientID string,
 		batchSize int,
 	) ([]patient.Profile, error)
+	DeletePatient(ctx context.Context, patientID string) error
 }
 
 type controller struct {
@@ -190,7 +191,13 @@ func (c *controller) UpdatePatient(ctx context.Context, patient patient.Profile)
 }
 
 func (c *controller) DeletePatient(ctx context.Context, patientID string) error {
-	panic("impl")
+	if patientID == "" {
+		return fmt.Errorf("missing patient id")
+	}
+	if err := c.storage.DeletePatient(ctx, patientID); err != nil {
+		return fmt.Errorf("cannot delete patient: %w", err)
+	}
+	return nil
 }
 
 func (c *controller) GetPatientVisits(ctx context.Context, patientID string, option patient.VisitQueryOption) (patient.VisitQueryResult, error) {

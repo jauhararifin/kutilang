@@ -256,7 +256,50 @@ func (d *db) UpdatePatient(ctx context.Context, patient patient.Profile, keyword
 }
 
 func (d *db) DeletePatient(ctx context.Context, patientID string) error {
-	panic("impl")
+	if err := d.init(ctx); err != nil {
+		return fmt.Errorf("cannot init table: %w", err)
+	}
+
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("cannot begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	deleteStmt, err := tx.PrepareContext(ctx, deletePatientSQL)
+	if err != nil {
+		return fmt.Errorf("cannot prepare delete statement: %w", err)
+	}
+	defer deleteStmt.Close()
+
+	updateRes, err := deleteStmt.ExecContext(ctx,patientID)
+	if err != nil {
+		return fmt.Errorf("cannot execute update statement: %w", err)
+	}
+
+	n, err := updateRes.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("cannot check number of rows affected: %w", err)
+	}
+	if n < 1 {
+		return fmt.Errorf("patient does not exist")
+	}
+
+	indexDeleteStmt, err := tx.PrepareContext(ctx, deleteIndexSQL)
+	if err != nil {
+		return fmt.Errorf("cannot prepare update index statement: %w", err)
+	}
+	defer indexDeleteStmt.Close()
+
+	if _, err := indexDeleteStmt.ExecContext(ctx, patientID); err != nil {
+		return fmt.Errorf("cannot execute delete statement: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("cannot commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (d *db) GetPatientVisits(
