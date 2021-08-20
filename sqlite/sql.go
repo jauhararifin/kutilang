@@ -38,9 +38,9 @@ const insertIndexSQL = "INSERT INTO patient_indices (keyword, last_visit, patien
 
 const updatePatientSQL = "UPDATE patients SET name=?, head_family_name=?, birth_date=?, address=? WHERE id=?"
 
-const deleteIndexSQL = "DELETE FROM patient_indices WHERE patient_id = ?"
+const deleteIndexSQL = "DELETE FROM patient_indices WHERE patient_id=?"
 
-const deletePatientSQL = "DELETE FROM patients WHERE id = ?"
+const deletePatientSQL = "UPDATE patients SET is_deleted=true WHERE id=?"
 
 const searchSQL = `
 SELECT
@@ -50,9 +50,18 @@ FROM
 ON
 	patient_indices.patient_id = patients.id
 WHERE 
-	(patient_indices.last_visit > ? OR patient_indices.last_visit = ? AND patient_indices.patient_id > ?) AND patients.is_deleted = false AND patient_indices.keyword in %s
+	(patient_indices.last_visit < ? OR patient_indices.last_visit = ? AND patient_indices.patient_id < ?) AND patients.is_deleted = false AND patient_indices.keyword in %s
 GROUP BY patients.id
 ORDER BY 
-	patient_indices.last_visit, patient_indices.patient_id
-DESC LIMIT ?
+	patient_indices.last_visit DESC, patient_indices.patient_id DESC
+LIMIT ?
 `
+
+const insertVisitSQL = "INSERT INTO visits (id, patient_id, timestamp, diagnosis, is_deleted) VALUES (?,?,?,?,?)"
+
+const updateVisitSQL = "UPDATE visits SET timestamp=?, diagnosis=? WHERE id=?"
+
+const deleteVisitSQL = "UPDATE visits SET is_deleted=true WHERE id=?"
+
+const getVisitSQL = "SELECT * FROM visits WHERE patient_id=? AND (timestamp < ? OR timestamp = ? AND id < ?) AND is_deleted=false ORDER BY timestamp DESC, id DESC LIMIT ?"
+

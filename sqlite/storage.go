@@ -272,7 +272,7 @@ func (d *db) DeletePatient(ctx context.Context, patientID string) error {
 	}
 	defer deleteStmt.Close()
 
-	updateRes, err := deleteStmt.ExecContext(ctx,patientID)
+	updateRes, err := deleteStmt.ExecContext(ctx, patientID)
 	if err != nil {
 		return fmt.Errorf("cannot execute update statement: %w", err)
 	}
@@ -302,22 +302,115 @@ func (d *db) DeletePatient(ctx context.Context, patientID string) error {
 	return nil
 }
 
+func (d *db) InsertPatientVisit(ctx context.Context, patientVisit patient.Visit) error {
+	if err := d.init(ctx); err != nil {
+		return fmt.Errorf("cannot init table: %w", err)
+	}
+
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("cannot create transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRowContext(ctx, getPatientSQL, patientVisit.PatientID)
+	if _, err := d.scanPatient(row); err != nil {
+		return fmt.Errorf("error scanning row: %w", err)
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		insertVisitSQL,
+		patientVisit.ID,
+		patientVisit.PatientID,
+		patientVisit.Date.Unix(),
+		patientVisit.Diagnosis,
+		false,
+	); err != nil {
+		return fmt.Errorf("cannot exec insert sql: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error commiting transaction: %w", err)
+	}
+
+	return nil
+}
+
 func (d *db) GetPatientVisits(
 	ctx context.Context,
 	patientID string,
-	option patient.VisitQueryOption,
-) (patient.VisitQueryResult, error) {
-	panic("impl")
+	dateCursor time.Time,
+	idCursor string,
+	batchSize int,
+) ([]patient.Visit, error) {
+	if err := d.init(ctx); err != nil {
+		return nil, fmt.Errorf("cannot init table: %w", err)
+	}
+	dateCursorTs := strconv.FormatInt(dateCursor.Unix(), 10)
+
+	rows, err := d.conn.QueryContext(ctx, getVisitSQL, patientID, dateCursorTs, dateCursorTs, idCursor, batchSize)
+	if err != nil {
+		return nil, fmt.Errorf("cannot query search sql: %w", err)
+	}
+	defer rows.Close()
+
+	patientVisits := make([]patient.Visit, 0)
+	for rows.Next() {
+		patientVisit, err := d.scanPatientVisit(rows)
+		if err != nil {
+			return nil, fmt.Errorf("cannot scan patient visit from db: %w", err)
+		}
+		patientVisits = append(patientVisits, patientVisit)
+	}
+
+	return patientVisits, nil
 }
 
-func (d *db) InsertPatientVisit(ctx context.Context, patientVisit patient.Visit) error {
-	panic("impl")
+func (d *db) scanPatientVisit(row scanner) (patient.Visit, error) {
+	result := patient.Visit{}
+	timestamp := int32(0)
+	if err := row.Scan(
+		&result.ID,
+		&result.PatientID,
+		&timestamp,
+		&result.Diagnosis,
+		&result.IsDeleted,
+	); err != nil {
+		return patient.Visit{}, err
+	}
+	result.Date = time.Unix(int64(timestamp), 0)
+
+	return result, nil
 }
 
 func (d *db) DeletePatientVisit(ctx context.Context, visitID string) error {
-	panic("impl")
+	if err := d.init(ctx); err != nil {
+		return fmt.Errorf("cannot init table: %w", err)
+	}
+
+	if _, err := d.conn.ExecContext(ctx, deleteVisitSQL, visitID); err != nil {
+		return fmt.Errorf("cannot exec update sql: %w", err)
+	}
+
+	return nil
 }
 
 func (d *db) UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit) error {
-	panic("impl")
+	if err := d.init(ctx); err != nil {
+		return fmt.Errorf("cannot init table: %w", err)
+	}
+
+	if _, err := d.conn.ExecContext(
+		ctx,
+		insertVisitSQL,
+		patientVisit.Date.Unix(),
+		patientVisit.Diagnosis,
+		patientVisit.ID,
+		false,
+	); err != nil {
+		return fmt.Errorf("cannot exec update sql: %w", err)
+	}
+
+	return nil
 }

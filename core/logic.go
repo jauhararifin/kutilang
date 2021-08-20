@@ -26,6 +26,17 @@ type Storage interface {
 		batchSize int,
 	) ([]patient.Profile, error)
 	DeletePatient(ctx context.Context, patientID string) error
+
+	InsertPatientVisit(ctx context.Context, patientVisit patient.Visit) error
+	GetPatientVisits(
+		ctx context.Context,
+		patientID string,
+		dateCursor time.Time,
+		idCursor string,
+		batchSize int,
+	) ([]patient.Visit, error)
+	DeletePatientVisit(ctx context.Context, visitID string) error
+	UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit) error
 }
 
 type controller struct {
@@ -116,7 +127,7 @@ func (c *controller) SearchPatient(ctx context.Context, query string, option pat
 	if option.BatchSize < 1 {
 		option.BatchSize = 1
 	}
-	lastVisit, lastPatientID, err := c.parseCursor(option.Cursor)
+	lastVisit, lastPatientID, err := c.parsePatientCursor(option.Cursor)
 	if err != nil {
 		return patient.SearchResult{}, fmt.Errorf("invalid cursor: %w", err)
 	}
@@ -129,7 +140,7 @@ func (c *controller) SearchPatient(ctx context.Context, query string, option pat
 	result := patient.SearchResult{Results: patients}
 	if len(patients) >= option.BatchSize {
 		lastEntry := patients[len(patients)-1]
-		result.NextCursor = c.buildCursor(strconv.FormatInt(lastEntry.LastVisit.Unix(), 10), lastEntry.ID)
+		result.NextCursor = c.buildPatientCursor(strconv.FormatInt(lastEntry.LastVisit.Unix(), 10), lastEntry.ID)
 	}
 
 	return result, nil
@@ -152,24 +163,24 @@ func (c *controller) getKeywordsFromQuery(query string) []string {
 	return keywords
 }
 
-func (c *controller) parseCursor(cursor string) (lastVisit time.Time, lastaPatientID string, err error) {
+func (c *controller) parsePatientCursor(cursor string) (lastVisit time.Time, lastaPatientID string, err error) {
 	if cursor == "" {
-		return time.Unix(0, 0), "", nil
+		return time.Now(), "", nil
 	}
 
 	parts := strings.Split(cursor, ".")
-	if len(cursor) != 2 {
-		return time.Time{}, "", fmt.Errorf("invalid format")
+	if len(parts) != 2 {
+		return time.Now(), "", fmt.Errorf("invalid format")
 	}
 	lastVisitTs, err := strconv.ParseInt(parts[0], 10, 32)
 	if err != nil {
-		return time.Time{}, "", fmt.Errorf("invalid format: %w", err)
+		return time.Now(), "", fmt.Errorf("invalid format: %w", err)
 	}
 
 	return time.Unix(lastVisitTs, 0), parts[1], nil
 }
 
-func (c *controller) buildCursor(lastVisit, lastPatientID string) string {
+func (c *controller) buildPatientCursor(lastVisit, lastPatientID string) string {
 	return lastVisit + "." + lastPatientID
 }
 
@@ -200,20 +211,100 @@ func (c *controller) DeletePatient(ctx context.Context, patientID string) error 
 	return nil
 }
 
-func (c *controller) GetPatientVisits(ctx context.Context, patientID string, option patient.VisitQueryOption) (patient.VisitQueryResult, error) {
-	panic("impl")
+func (c *controller) InsertPatientVisit(ctx context.Context, patientVisit patient.Visit) (patient.Visit, error) {
+	if err := c.validatePatientVisit(&patientVisit); err != nil {
+		return patient.Visit{}, fmt.Errorf("invalid patient visit info: %w", err)
+	}
+
+	patientVisit.ID = c.generateID()
+	patientVisit.Date = time.Now()
+
+	if err := c.storage.InsertPatientVisit(ctx, patientVisit); err != nil {
+		return patient.Visit{}, fmt.Errorf("cannot insert patient visit: %w", err)
+	}
+
+	patientVisit.Date = patientVisit.Date.Local()
+	return patientVisit, nil
 }
 
-func (c *controller) InsertPatientVisit(ctx context.Context, patientVisit patient.Visit) error {
-	panic("impl")
+func (c *controller) validatePatientVisit(patientVisit *patient.Visit) error {
+	if strings.TrimSpace(patientVisit.Diagnosis) == "" {
+		return fmt.Errorf("missing diagnosis")
+	}
+	return nil
+}
+
+func (c *controller) GetPatientVisits(ctx context.Context, patientID string, option patient.VisitQueryOption) (patient.VisitQueryResult, error) {
+	if option.BatchSize > 30 {
+		return patient.VisitQueryResult{}, fmt.Errorf("batch is maximum at 30")
+	}
+	if option.BatchSize < 1 {
+		option.BatchSize = 1
+	}
+	tsCursor, patientVisitIDCursor, err := c.parsePatientVisitCursor(option.NextCursor)
+	if err != nil {
+		return patient.VisitQueryResult{}, fmt.Errorf("invalid cursor: %w", err)
+	}
+
+	patientVisits, err := c.storage.GetPatientVisits(ctx, patientID, tsCursor, patientVisitIDCursor, option.BatchSize)
+	if err != nil {
+		return patient.VisitQueryResult{}, err
+	}
+
+	result := patient.VisitQueryResult{Results: patientVisits}
+	if len(patientVisits) >= option.BatchSize {
+		lastEntry := patientVisits[len(patientVisits)-1]
+		result.NextCursor = c.buildPatientVisitCursor(lastEntry.Date, lastEntry.ID)
+	}
+
+	return result, nil
+}
+
+func (c *controller) parsePatientVisitCursor(cursor string) (lastVisit time.Time, id string, err error) {
+	if cursor == "" {
+		return time.Now(), "", nil
+	}
+
+	parts := strings.Split(cursor, ".")
+	if len(parts) != 2 {
+		return time.Now(), "", fmt.Errorf("invalid format")
+	}
+	timestamp, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil {
+		return time.Now(), "", fmt.Errorf("invalid format: %w", err)
+	}
+
+	return time.Unix(timestamp, 0), parts[1], nil
+}
+
+func (c *controller) buildPatientVisitCursor(timestamp time.Time, id string) string {
+	return strconv.FormatInt(timestamp.Unix(), 10) + "." + id
 }
 
 func (c *controller) DeletePatientVisit(ctx context.Context, visitID string) error {
-	panic("impl")
+	if visitID == "" {
+		return fmt.Errorf("missing patient visit id")
+	}
+	if err := c.storage.DeletePatientVisit(ctx, visitID); err != nil {
+		return fmt.Errorf("cannot delete patient visit: %w", err)
+	}
+	return nil
 }
 
 func (c *controller) UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit) error {
-	panic("impl")
+	if err := c.validatePatientVisit(&patientVisit); err != nil {
+		return fmt.Errorf("invalid patient visit info: %w", err)
+	}
+
+	if patientVisit.ID == "" {
+		return fmt.Errorf("missing patient id visit")
+	}
+
+	if err := c.storage.UpdatePatientVisit(ctx, patientVisit); err != nil {
+		return fmt.Errorf("cannot update patient visit: %w", err)
+	}
+
+	return nil
 }
 
 func NewController(storage Storage, logger log.Log) *controller {

@@ -70,6 +70,51 @@ sqlite3 ~/.config/kutilang/db.sqlite3 "SELECT * FROM patients"
 echo index table:
 sqlite3 ~/.config/kutilang/db.sqlite3 "SELECT * FROM patient_indices"
 
-# ====================================== search patient =========================================
+# ====================================== insert patient fixtures =========================================
 
 ./scripts/fixtures.sh
+
+# ====================================== search patient ==========================================
+
+# TODO (jauhararifin): add search patient
+
+# ====================================== insert visit ============================================
+
+echo
+echo inserting entries for $PATIENT1_ID
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'
+curl -L -X POST "http://localhost:5000/api/v1/patients/$PATIENT1_ID/visits/" --header 'Content-Type: application/json'  --data-raw '{"diagnosis": "Lorem <b>ipsum</b> dos color sit amet."}'

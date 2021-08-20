@@ -33,7 +33,8 @@ type Visit struct {
 }
 
 type VisitQueryOption struct {
-	BatchSize int
+	BatchSize int 
+	NextCursor string
 }
 
 type VisitQueryResult struct {
@@ -48,7 +49,7 @@ type Service interface {
 	UpdatePatient(ctx context.Context, patient Profile) error
 	DeletePatient(ctx context.Context, patientID string) error
 
-	InsertPatientVisit(ctx context.Context, patientVisit Visit) error
+	InsertPatientVisit(ctx context.Context, patientVisit Visit) (Visit, error)
 	GetPatientVisits(ctx context.Context, patientID string, option VisitQueryOption) (VisitQueryResult, error)
 	DeletePatientVisit(ctx context.Context, visitID string) error
 	UpdatePatientVisit(ctx context.Context, patientVisit Visit) error

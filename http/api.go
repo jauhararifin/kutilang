@@ -20,9 +20,13 @@ func (h *handler) Start(addr string) error {
 	router := mux.NewRouter()
 	router.Path("/api/v1/patients/").HandlerFunc(h.handleInsertPatient).Methods("POST")
 	router.Path("/api/v1/search/").HandlerFunc(h.handleSearchPatient).Methods("GET") //.Queries("q", "{q}", "cursor", "{cursor}")
-	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleGetPatient).Methods("GET")
-	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleUpdatePatient).Methods("PUT")
-	router.Path("/api/v1/patients/{patientID}").HandlerFunc(h.handleDeletePatient).Methods("DELETE")
+	router.Path("/api/v1/patients/{patientID}/").HandlerFunc(h.handleGetPatient).Methods("GET")
+	router.Path("/api/v1/patients/{patientID}/").HandlerFunc(h.handleUpdatePatient).Methods("PUT")
+	router.Path("/api/v1/patients/{patientID}/").HandlerFunc(h.handleDeletePatient).Methods("DELETE")
+	router.Path("/api/v1/patients/{patientID}/visits/").HandlerFunc(h.handleInsertPatientVisit).Methods("POST")
+	router.Path("/api/v1/patients/{patientID}/visits/").HandlerFunc(h.handleGetPatientVisit).Methods("GET")
+	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleDeletePatientVisit).Methods("DELETE")
+	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleUpdatePatientVisit).Methods("PUT")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
 	router.Use(log.NewMiddleware(h.logger))
@@ -119,6 +123,71 @@ func (h *handler) handleDeletePatient(w http.ResponseWriter, req *http.Request) 
 	err := h.service.DeletePatient(req.Context(), patientID)
 	if err != nil {
 		h.writeResult(w, nil, fmt.Errorf("cannot delete patient: %w", err))
+		return
+	}
+
+	h.writeResult(w, nil, nil)
+}
+
+func (h *handler) handleInsertPatientVisit(w http.ResponseWriter, req *http.Request) {
+	patientVisit := patient.Visit{}
+	if err := json.NewDecoder(req.Body).Decode(&patientVisit); err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot decode body: %w", err))
+		return
+	}
+
+	patientID := mux.Vars(req)["patientID"]
+	patientVisit.PatientID = patientID
+
+	result, err := h.service.InsertPatientVisit(req.Context(), patientVisit)
+	if err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot insert patient visit: %w", err))
+		return
+	}
+
+	h.writeResult(w, result, nil)
+}
+
+func (h *handler) handleGetPatientVisit(w http.ResponseWriter, req *http.Request) {
+	patientID := mux.Vars(req)["patientID"]
+	cursor := req.FormValue("cursor")
+
+	result, err := h.service.GetPatientVisits(req.Context(), patientID, patient.VisitQueryOption{
+		BatchSize:  30,
+		NextCursor: cursor,
+	})
+	if err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot get patient visit: %w", err))
+		return
+	}
+
+	h.writeResult(w, result, nil)
+}
+
+func (h *handler) handleUpdatePatientVisit(w http.ResponseWriter, req *http.Request) {
+	patientVisitID := mux.Vars(req)["patientVisitID"]
+	patientID := mux.Vars(req)["patientID"]
+	patientVisit := patient.Visit{}
+	if err := json.NewDecoder(req.Body).Decode(&patientVisit); err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot decode body: %w", err))
+		return
+	}
+	patientVisit.ID = patientVisitID
+	patientVisit.PatientID = patientID
+
+	if err := h.service.UpdatePatientVisit(req.Context(), patientVisit); err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot insert patient visit: %w", err))
+		return
+	}
+
+	h.writeResult(w, nil, nil)
+}
+
+func (h *handler) handleDeletePatientVisit(w http.ResponseWriter, req *http.Request) {
+	patientVisitID := mux.Vars(req)["patientVisitID"]
+
+	if err := h.service.DeletePatientVisit(req.Context(), patientVisitID); err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot delete patient visit: %w", err))
 		return
 	}
 
