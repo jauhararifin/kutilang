@@ -20,7 +20,7 @@ function Navigation() {
 	return (
 		<Navbar>
 			<Container>
-				<Navbar.Brand href="#home">Clinic</Navbar.Brand>
+				<Navbar.Brand href="/">Clinic</Navbar.Brand>
 				<Navbar.Collapse className="justify-content-end">
 					<Nav>
 						<Nav.Link href="/">Search</Nav.Link>

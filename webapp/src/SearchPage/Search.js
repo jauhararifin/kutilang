@@ -11,6 +11,7 @@ import axios from 'axios';
 import { searchPatients } from '../service';
 import Noty from 'noty';
 import moment from 'moment';
+import { useHistory } from "react-router-dom";
 
 function SearchPage() {
 	const search = useLocation().search;
@@ -60,7 +61,10 @@ function SearchView({query, setQuery, isLoading, patients, hasNext, loadNext, on
 	const [q, setQ] = useState(query || '')
 	return (
 		<Container>
-			<Form action="#" onSubmit={()=>setQuery(q)}>
+			<form onSubmit={event => {
+				event.preventDefault();
+				setQuery(q)
+			}}>
 				<Row style={{ marginBottom: 20 }}>
 					<FormControl
 						type="search"
@@ -70,7 +74,7 @@ function SearchView({query, setQuery, isLoading, patients, hasNext, loadNext, on
 						onChange={ev=>setQ(ev.target.value)}
 					/>
 				</Row>
-			</Form>
+			</form>
 			<Row>
 				<SearchTableResultView isLoading={isLoading} patients={patients} hasNext={hasNext} loadNext={loadNext} />
 			</Row>
@@ -79,6 +83,7 @@ function SearchView({query, setQuery, isLoading, patients, hasNext, loadNext, on
 }
 
 function SearchTableResultView({isLoading, patients, hasNext, loadNext}) {
+	const history = useHistory();
 	return (
 		<Table striped bordered hover>
 			<thead>
@@ -95,19 +100,21 @@ function SearchTableResultView({isLoading, patients, hasNext, loadNext}) {
 					<td colSpan={5} align="center">No patient found</td>
 				</tr> }
 
-				{ patients.map(patient => (<tr key={patient.id}>
-					<td>{patient['name']}</td>
-					<td>{patient['headFamilyName']}</td>
-					<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} years old)</td>
-					<td>{patient['address']}</td>
-					<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
-				</tr>))}
+				{ patients.map(patient => (
+					<tr key={patient.id} style={{cursor: 'pointer'}} onClick={()=>history.push(`/patients/${patient.id}`)}>
+						<td>{patient['name']}</td>
+						<td>{patient['headFamilyName']}</td>
+						<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} years old)</td>
+						<td>{patient['address']}</td>
+						<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
+					</tr>
+				))}
 
 				{ isLoading && <tr style={{textAlign:'center'}}>
 					<td colSpan={5}><Spinner animation="border" role="status"><span className="visually-hidden">Loading...</span></Spinner></td>
 				</tr>}
 
-				{ !isLoading && hasNext && <tr onClick={loadNext}>
+				{ !isLoading && hasNext && <tr onClick={loadNext} style={{cursor: 'pointer'}}>
 					<td colSpan={5} align="center"><a href="#">Load more</a></td>
 				</tr> }
 			</tbody>
