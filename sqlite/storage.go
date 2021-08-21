@@ -80,7 +80,7 @@ func (d *db) InsertPatient(ctx context.Context, patient patient.Profile, keyword
 	defer indexStmt.Close()
 
 	for _, keyword := range keywords {
-		if _, err := indexStmt.ExecContext(ctx, keyword, patient.LastVisit, patient.ID); err != nil {
+		if _, err := indexStmt.ExecContext(ctx, keyword, patient.LastVisit.Unix(), patient.ID); err != nil {
 			return fmt.Errorf("cannot insert keyword %s for patient: %w", keyword, err)
 		}
 	}
@@ -244,7 +244,7 @@ func (d *db) UpdatePatient(ctx context.Context, patient patient.Profile, keyword
 	defer indexStmt.Close()
 
 	for _, keyword := range keywords {
-		if _, err := indexStmt.ExecContext(ctx, keyword, patient.LastVisit, patient.ID); err != nil {
+		if _, err := indexStmt.ExecContext(ctx, keyword, patient.LastVisit.Unix(), patient.ID); err != nil {
 			return fmt.Errorf("cannot insert keyword %s for patient: %w", keyword, err)
 		}
 	}

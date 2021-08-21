@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
 	"github.com/jauhararifin/kutilang/log"
@@ -30,6 +31,7 @@ func (h *handler) Start(addr string) error {
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
 	router.Use(log.NewMiddleware(h.logger))
+	router.Use(handlers.CORS())
 
 	return http.ListenAndServe(addr, router)
 }
