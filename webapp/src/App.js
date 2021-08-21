@@ -10,6 +10,7 @@ function App() {
 		<BrowserRouter>
 			<Navigation />
 			<Route path="/" exact component={SearchPage} />
+			<Route path="/patients/" exact component={VisitPage} />
 			<Route path="/patients/:patientId" exact component={VisitPage} />
 		</BrowserRouter>
 	);

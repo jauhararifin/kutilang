@@ -4,6 +4,8 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 
 import 'bootstrap/dist/css/bootstrap.min.css';
+import "noty/lib/noty.css";  
+import "noty/lib/themes/bootstrap-v4.css";
 
 ReactDOM.render(
 	<React.StrictMode>
