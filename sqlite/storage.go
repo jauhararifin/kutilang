@@ -412,8 +412,7 @@ func (d *db) UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit)
 
 	if _, err := d.conn.ExecContext(
 		ctx,
-		insertVisitSQL,
-		patientVisit.Date.Unix(),
+		updateVisitSQL,
 		patientVisit.Diagnosis,
 		patientVisit.ID,
 		false,

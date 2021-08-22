@@ -189,12 +189,13 @@ func (h *handler) handleUpdatePatientVisit(w http.ResponseWriter, req *http.Requ
 	patientVisit.ID = patientVisitID
 	patientVisit.PatientID = patientID
 
-	if err := h.service.UpdatePatientVisit(req.Context(), patientVisit); err != nil {
+	result, err := h.service.UpdatePatientVisit(req.Context(), patientVisit)
+	if err != nil {
 		h.writeResult(w, nil, fmt.Errorf("cannot insert patient visit: %w", err))
 		return
 	}
 
-	h.writeResult(w, nil, nil)
+	h.writeResult(w, result, nil)
 }
 
 func (h *handler) handleDeletePatientVisit(w http.ResponseWriter, req *http.Request) {

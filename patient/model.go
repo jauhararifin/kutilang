@@ -52,5 +52,5 @@ type Service interface {
 	InsertPatientVisit(ctx context.Context, patientVisit Visit) (Visit, error)
 	GetPatientVisits(ctx context.Context, patientID string, option VisitQueryOption) (VisitQueryResult, error)
 	DeletePatientVisit(ctx context.Context, visitID string) error
-	UpdatePatientVisit(ctx context.Context, patientVisit Visit) error
+	UpdatePatientVisit(ctx context.Context, patientVisit Visit) (Visit, error)
 }

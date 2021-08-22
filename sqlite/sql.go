@@ -61,7 +61,7 @@ const insertVisitSQL = "INSERT INTO visits (id, patient_id, timestamp, diagnosis
 
 const updatePatientLastVisitSQL = "UPDATE patients SET last_visit=? WHERE id=?"
 
-const updateVisitSQL = "UPDATE visits SET timestamp=?, diagnosis=? WHERE id=?"
+const updateVisitSQL = "UPDATE visits SET diagnosis=? WHERE id=?"
 
 const deleteVisitSQL = "UPDATE visits SET is_deleted=true WHERE id=?"
 

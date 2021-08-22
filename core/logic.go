@@ -291,20 +291,20 @@ func (c *controller) DeletePatientVisit(ctx context.Context, visitID string) err
 	return nil
 }
 
-func (c *controller) UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit) error {
+func (c *controller) UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit) (patient.Visit, error) {
 	if err := c.validatePatientVisit(&patientVisit); err != nil {
-		return fmt.Errorf("invalid patient visit info: %w", err)
+		return patient.Visit{}, fmt.Errorf("invalid patient visit info: %w", err)
 	}
 
 	if patientVisit.ID == "" {
-		return fmt.Errorf("missing patient id visit")
+		return patient.Visit{}, fmt.Errorf("missing patient id visit")
 	}
 
 	if err := c.storage.UpdatePatientVisit(ctx, patientVisit); err != nil {
-		return fmt.Errorf("cannot update patient visit: %w", err)
+		return patient.Visit{}, fmt.Errorf("cannot update patient visit: %w", err)
 	}
 
-	return nil
+	return patientVisit, nil
 }
 
 func NewController(storage Storage, logger log.Log) *controller {

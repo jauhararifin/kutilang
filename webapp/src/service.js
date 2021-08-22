@@ -58,6 +58,28 @@ export async function insertVisit(patientVisit) {
 		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }
 
+export async function putVisit(patientVisit) {
+	return fetch(`${baseURL}/patients/${patientVisit['patientId']}/visits/${patientVisit['id']}/`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(patientVisit),
+		mode: 'cors',
+		crossDomain: true,
+	}).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
+}
+
+export async function deleteVisit(patientVisit) {
+	return fetch(`${baseURL}/patients/${patientVisit['patientId']}/visits/${patientVisit['id']}/`, {
+		method: 'DELETE',
+		mode: 'cors',
+		crossDomain: true,
+	}).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
+}
+
 export async function getPatientVisits(patientId, cursor) {
 	return fetch(`${baseURL}/patients/${patientId}/visits/?` + new URLSearchParams({ cursor })).
 		then(res => res.json()).
