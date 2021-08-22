@@ -1,4 +1,7 @@
+import { ContentState, convertToRaw, EditorState } from 'draft-js';
+import draftToHtml from 'draftjs-to-html';
 import { useFormik } from 'formik';
+import htmlToDraft from 'html-to-draftjs';
 import moment from 'moment';
 import 'moment/locale/id';
 import Noty from 'noty';
@@ -12,21 +15,18 @@ import Row from 'react-bootstrap/Row';
 import Spinner from 'react-bootstrap/Spinner';
 import Table from 'react-bootstrap/Table';
 import { Editor } from "react-draft-wysiwyg";
-import { convertToRaw, convertFromRaw, EditorState, ContentState } from 'draft-js';
-import draftToHtml from 'draftjs-to-html';
-import htmlToDraft from 'html-to-draftjs';
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
 import { BsPencil, BsTrash } from "react-icons/bs";
 import { useHistory, useParams } from 'react-router-dom';
 import * as Yup from 'yup';
-import { deletePatient, getPatient, postPatient, putPatient, insertVisit, putVisit, getPatientVisits, deleteVisit } from '../service';
+import { deletePatient, deleteVisit, getPatient, getPatientVisits, insertVisit, postPatient, putPatient, putVisit } from '../service';
 
 function showSuccessPopup(text) {
-	new Noty({ text: text, layout: 'topCenter', type: 'success', theme: 'bootstrap-v4' }).show();
+	new Noty({ text: text, layout: 'topCenter', type: 'success', theme: 'bootstrap-v4', timeout: 3000 }).show();
 }
 
 function showErrorPopup(text) {
-	new Noty({ text: text, layout: 'topCenter', type: 'error', theme: 'bootstrap-v4' }).show();
+	new Noty({ text: text, layout: 'topCenter', type: 'error', theme: 'bootstrap-v4', timeout: 3000 }).show();
 }
 
 function VisitPage() {
@@ -84,15 +84,15 @@ function VisitPage() {
 		setIsLoading(false)
 	}
 
-	const updateProfile = async (patient) => {
+	const updateProfile = async (newPatient) => {
 		setIsLoading(true)
-		const resp = await putPatient(patient)
+		const resp = await putPatient({...newPatient, id: patient.id})
 		if (resp['errorMessage'])
 			showErrorPopup(resp['errorMessage'])
 		else {
 			showSuccessPopup('Patient updated')
 			setIsEditingProfile(false)
-			setPatient(patient)
+			setPatient(newPatient)
 		}
 		setIsLoading(false)
 	}
@@ -147,7 +147,7 @@ function VisitPage() {
 		setIsLoading(true)
 		const resp = await deleteVisit({
 			id: id,
-			patientId: patient.id,
+			patientId: patientId,
 		})
 		if (resp['errorMessage'])
 			showErrorPopup(resp['errorMessage'])

@@ -25,7 +25,6 @@ function Navigation() {
 					<Nav>
 						<Nav.Link href="/">Search</Nav.Link>
 						<Nav.Link href="/patients">New</Nav.Link>
-						<Nav.Link href="/backup">Backup</Nav.Link>
 					</Nav>
 				</Navbar.Collapse>
 			</Container>

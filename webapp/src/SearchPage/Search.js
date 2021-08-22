@@ -24,7 +24,7 @@ function SearchPage() {
 		setIsLoading(true)
 		const result = await searchPatients(query, '')
 		if (result['errorMessage']) {
-			new Noty({text: result['errorMessage'], layout: 'topCenter', type:'error', theme: 'bootstrap-v4'}).show();
+			new Noty({text: result['errorMessage'], layout: 'topCenter', type:'error', theme: 'bootstrap-v4', timeout: 3000}).show();
 		} else {
 			setPatients(result['result']['results'])
 			setNextCursor(result['result']['nextCursor'])
@@ -36,7 +36,7 @@ function SearchPage() {
 		setIsLoading(true)
 		const result = await searchPatients(query, nextCursor)
 		if (result['errorMessage']) {
-			new Noty({text: result['errorMessage'], layout: 'topCenter', type:'error', theme: 'bootstrap-v4'}).show();
+			new Noty({text: result['errorMessage'], layout: 'topCenter', type:'error', theme: 'bootstrap-v4', timeout: 3000}).show();
 		} else {
 			setPatients([...patients, ...result['result']['results']])
 			setNextCursor(result['result']['nextCursor'])

@@ -24,12 +24,7 @@ type db struct {
 	initialized bool
 }
 
-func NewDB(logger log.Log) (*db, error) {
-	sqlitePath, err := PrepareSqliteFile()
-	if err != nil {
-		return nil, fmt.Errorf("cannot prepare sqlite file: %w", err)
-	}
-
+func NewDB(sqlitePath string, logger log.Log) (*db, error) {
 	conn, err := sql.Open("sqlite3", sqlitePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to sqlite3: %w", err)

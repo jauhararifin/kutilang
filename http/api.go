@@ -92,7 +92,7 @@ func (h *handler) handleSearchPatient(w http.ResponseWriter, req *http.Request) 
 	query := req.FormValue("q")
 	cursor := req.FormValue("cursor")
 
-	result, err := h.service.SearchPatient(req.Context(), query, patient.SearchOption{Cursor: cursor, BatchSize: 2})
+	result, err := h.service.SearchPatient(req.Context(), query, patient.SearchOption{Cursor: cursor, BatchSize: 30})
 	if err != nil {
 		h.writeResult(w, nil, fmt.Errorf("cannot search patient: %w", err))
 		return
