@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { useFormik } from 'formik';
 import moment from 'moment';
 import 'moment/locale/id';
@@ -17,7 +16,7 @@ import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
 import { BsPencil, BsTrash } from "react-icons/bs";
 import { useHistory, useParams } from 'react-router-dom';
 import * as Yup from 'yup';
-import { getPatient, postPatient, putPatient } from '../service';
+import { deletePatient, getPatient, postPatient, putPatient } from '../service';
 
 const baseURL = "http://localhost:5000"
 
@@ -75,24 +74,18 @@ function VisitPage() {
 		setIsLoading(false)
 	}
 
-	const editProfile = (patient) => {
-		setIsEditingProfile(true)
-	}
+	const editProfile = () => { setIsEditingProfile(true) }
 
-	const deleteProfile = async (patient) => {
+	const deleteProfile = async () => {
 		if (!window.confirm('Are you sure you want to delete this patient?'))
 			return
 
-		try {
-			const result = await axios.delete(`${baseURL}/api/v1/patients/${patientId}`).then(res => res.data)
-			if (result['errorMessage']) {
-				new Noty({ text: result['errorMessage'], layout: 'topCenter', type: 'error' }).show();
-			} else {
-				new Noty({ text: 'Patient deleted', layout: 'topCenter', type: 'success' }).show();
-				history.push("/")
-			}
-		} catch (e) {
-			new Noty({ text: 'Something went wrong', layout: 'topCenter', type: 'error' }).show();
+		const resp = await deletePatient(patient)
+		if (resp['errorMessage'])
+			showErrorPopup(resp['errorMessage'])
+		else {
+			showSuccessPopup('Patient deleted')
+			history.replace('/')
 		}
 	}
 

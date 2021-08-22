@@ -24,6 +24,16 @@ export async function postPatient(patient) {
 		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }
 
+export async function deletePatient(patient) {
+	return fetch(`${baseURL}/patients/${patient.id}/`, {
+		method: 'DELETE',
+		mode: 'cors',
+		crossDomain: true,
+	}).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
+}
+
 export async function putPatient(patient) {
 	return fetch(`${baseURL}/patients/${patient['id']}/`, {
 		method: 'PUT',

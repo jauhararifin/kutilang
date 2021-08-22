@@ -33,6 +33,7 @@ func (h *handler) Start(addr string) error {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("Access-Control-Allow-Origin", "*")
 			w.Header().Add("Access-Control-Allow-Headers", "*")
+			w.Header().Add("Access-Control-Allow-Methods", "*")
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(200)
