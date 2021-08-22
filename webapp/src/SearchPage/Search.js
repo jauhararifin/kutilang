@@ -1,17 +1,13 @@
-import Container from 'react-bootstrap/Container';
-import Row from 'react-bootstrap/Row';
-import Form from 'react-bootstrap/Form';
-import Spinner from 'react-bootstrap/Spinner';
-import FormControl from 'react-bootstrap/FormControl';
-import Table from 'react-bootstrap/Table';
-import Button from 'react-bootstrap/Button';
-import { useLocation } from "react-router-dom";
-import { useState, useEffect } from 'react';
-import axios from 'axios';
-import { searchPatients } from '../service';
-import Noty from 'noty';
 import moment from 'moment';
-import { useHistory } from "react-router-dom";
+import Noty from 'noty';
+import { useEffect, useState } from 'react';
+import Container from 'react-bootstrap/Container';
+import FormControl from 'react-bootstrap/FormControl';
+import Row from 'react-bootstrap/Row';
+import Spinner from 'react-bootstrap/Spinner';
+import Table from 'react-bootstrap/Table';
+import { useHistory, useLocation } from "react-router-dom";
+import { searchPatients } from '../service';
 
 function SearchPage() {
 	const search = useLocation().search;
@@ -57,7 +53,7 @@ function SearchPage() {
 		loadNext={loadNext} />
 }
 
-function SearchView({query, setQuery, isLoading, patients, hasNext, loadNext, onSubmit}) {
+function SearchView({query, setQuery, isLoading, patients, hasNext, loadNext}) {
 	const [q, setQ] = useState(query || '')
 	return (
 		<Container>

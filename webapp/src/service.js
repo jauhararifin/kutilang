@@ -1,30 +1,37 @@
 const baseURL = 'http://localhost:5000/api/v1'
 
 export async function searchPatients(q, cursor) {
-	return fetch(baseURL + '/search/?' +  new URLSearchParams({q, cursor})).then(res => res.json()).catch(e => ({'errorMessage': 'Something went wrong'}))
+	return fetch(baseURL + '/search/?' + new URLSearchParams({ q, cursor }))
+		.then(res => res.json())
+		.catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }
 
 export async function getPatient(id) {
-	return fetch(`${baseURL}/patients/${id}/`).then(res => res.json()).catch(e => ({'errorMessage': 'Something went wrong'}))
+	return fetch(`${baseURL}/patients/${id}/`).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }
 
 export async function postPatient(patient) {
 	return fetch(`${baseURL}/patients/`, {
 		method: 'POST',
-		// somehow adding the header makes the origin header not send
-		headers: {'Content-Type': 'application/json'},
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(patient),
 		mode: 'cors',
-		crossDomain:true,
-	}).then(res => res.json()).catch(e => ({'errorMessage': 'Something went wrong'}))
+		crossDomain: true,
+	}).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }
 
 export async function putPatient(patient) {
 	return fetch(`${baseURL}/patients/${patient['id']}/`, {
 		method: 'PUT',
-		headers: {'Content-Type': 'application/json'},
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(patient),
 		mode: 'cors',
-		crossDomain:true,
-	}).then(res => res.json()).catch(e => ({'errorMessage': 'Something went wrong'}))
+		crossDomain: true,
+	}).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }

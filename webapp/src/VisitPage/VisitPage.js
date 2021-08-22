@@ -1,36 +1,32 @@
+import axios from 'axios';
+import { useFormik } from 'formik';
+import moment from 'moment';
+import 'moment/locale/id';
+import Noty from 'noty';
 import { useEffect, useState } from 'react';
-import { useHistory } from 'react-router-dom';
-import Container from 'react-bootstrap/Container';
-import Spinner from 'react-bootstrap/Spinner';
-import Table from 'react-bootstrap/Table';
-import Card from 'react-bootstrap/Card';
-import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
-import Row from 'react-bootstrap/Row';
+import Card from 'react-bootstrap/Card';
+import Container from 'react-bootstrap/Container';
 import Form from 'react-bootstrap/Form';
 import InputGroup from 'react-bootstrap/InputGroup';
-import FormControl from 'react-bootstrap/FormControl';
-import { BsPencil, BsTrash } from "react-icons/bs";
+import Row from 'react-bootstrap/Row';
+import Spinner from 'react-bootstrap/Spinner';
+import Table from 'react-bootstrap/Table';
 import { Editor } from "react-draft-wysiwyg";
-import { useParams } from "react-router-dom";
-import { useFormik } from 'formik';
-import 'moment/locale/id';
-import moment from 'moment';
-import * as Yup from 'yup';
-import Noty from 'noty';
-import axios from 'axios';
-import {getPatient, postPatient, putPatient} from '../service';
-
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
+import { BsPencil, BsTrash } from "react-icons/bs";
+import { useHistory, useParams } from 'react-router-dom';
+import * as Yup from 'yup';
+import { getPatient, postPatient, putPatient } from '../service';
 
 const baseURL = "http://localhost:5000"
 
 function showSuccessPopup(text) {
-	new Noty({text: text, layout: 'topCenter', type:'success', theme: 'bootstrap-v4'}).show();
+	new Noty({ text: text, layout: 'topCenter', type: 'success', theme: 'bootstrap-v4' }).show();
 }
 
 function showErrorPopup(text) {
-	new Noty({text: text, layout: 'topCenter', type:'error', theme: 'bootstrap-v4'}).show();
+	new Noty({ text: text, layout: 'topCenter', type: 'error', theme: 'bootstrap-v4' }).show();
 }
 
 function VisitPage() {
@@ -90,18 +86,18 @@ function VisitPage() {
 		try {
 			const result = await axios.delete(`${baseURL}/api/v1/patients/${patientId}`).then(res => res.data)
 			if (result['errorMessage']) {
-				new Noty({text: result['errorMessage'], layout: 'topCenter', type:'error'}).show();
+				new Noty({ text: result['errorMessage'], layout: 'topCenter', type: 'error' }).show();
 			} else {
-				new Noty({text: 'Patient deleted', layout: 'topCenter', type:'success'}).show();
+				new Noty({ text: 'Patient deleted', layout: 'topCenter', type: 'success' }).show();
 				history.push("/")
 			}
 		} catch (e) {
-			new Noty({text: 'Something went wrong', layout: 'topCenter', type:'error'}).show();
+			new Noty({ text: 'Something went wrong', layout: 'topCenter', type: 'error' }).show();
 		}
 	}
 
 	return <Container>
-		{ isLoading && <div style={{textAlign:'center'}}>
+		{isLoading && <div style={{ textAlign: 'center' }}>
 			<Spinner animation="border" role="status"><span className="visually-hidden">Loading...</span></Spinner>
 		</div>}
 
@@ -129,14 +125,14 @@ function VisitPage() {
 			<Visit />
 			<Visit />
 
-			<Row style={{marginBottom: 20}}>
+			<Row style={{ marginBottom: 20 }}>
 				<Button variant="link">Load more...</Button>
 			</Row>
 		</>}
 	</Container>
 }
 
-function Profile({patient, onEdit, onDelete}) {
+function Profile({ patient, onEdit, onDelete }) {
 	return <Table striped bordered hover>
 		<tbody>
 			<tr>
@@ -160,7 +156,7 @@ function Profile({patient, onEdit, onDelete}) {
 				<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
 			</tr>
 			<tr>
-				<td colSpan={2} style={{textAlign: "right"}}>
+				<td colSpan={2} style={{ textAlign: "right" }}>
 					<Button variant="secondary" onClick={onEdit}>Edit</Button>{' '}
 					<Button variant="danger" onClick={onDelete}>Delete</Button>
 				</td>
@@ -169,7 +165,7 @@ function Profile({patient, onEdit, onDelete}) {
 	</Table>
 }
 
-function ProfileEditor({patient, onSubmit}) {
+function ProfileEditor({ patient, onSubmit }) {
 	patient = patient || {}
 	const lastVisit = patient['lastVisit'] ? moment(patient['lastVisit']) : moment()
 	const formik = useFormik({
@@ -240,7 +236,7 @@ function ProfileEditor({patient, onSubmit}) {
 					<td>{lastVisit.format('LL')}</td>
 				</tr>
 				<tr>
-					<td colSpan={2} style={{textAlign: "right"}}>
+					<td colSpan={2} style={{ textAlign: "right" }}>
 						<Button variant="success" type="submit">Save</Button>
 					</td>
 				</tr>
