@@ -12,13 +12,13 @@ import Row from 'react-bootstrap/Row';
 import Spinner from 'react-bootstrap/Spinner';
 import Table from 'react-bootstrap/Table';
 import { Editor } from "react-draft-wysiwyg";
+import { convertToRaw, EditorState } from 'draft-js';
+import draftToHtml from 'draftjs-to-html';
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
 import { BsPencil, BsTrash } from "react-icons/bs";
 import { useHistory, useParams } from 'react-router-dom';
 import * as Yup from 'yup';
-import { deletePatient, getPatient, postPatient, putPatient } from '../service';
-
-const baseURL = "http://localhost:5000"
+import { deletePatient, getPatient, postPatient, putPatient, insertVisit, getPatientVisits } from '../service';
 
 function showSuccessPopup(text) {
 	new Noty({ text: text, layout: 'topCenter', type: 'success', theme: 'bootstrap-v4' }).show();
@@ -35,17 +35,39 @@ function VisitPage() {
 	const [isLoading, setIsLoading] = useState(false)
 
 	const [patient, setPatient] = useState(null)
+	const [patientVisits, setPatientVisits] = useState([])
+	const [nextCursor, setNextCursor] = useState('')
+
 	useEffect(async () => {
 		if (!patientId) return
 		setIsLoading(true)
+
 		const result = await getPatient(patientId)
-		if (result['errorMessage']) {
+		if (result['errorMessage'])
 			showErrorPopup(result['errorMessage'])
-		} else {
+		else
 			setPatient(result['result'])
+
+		const visitResp = await getPatientVisits(patientId, '')
+		if (visitResp['errorMessage'])
+			showErrorPopup(visitResp['errorMessage'])
+		else {
+			setPatientVisits(visitResp['result']['results'])
+			setNextCursor(visitResp['result']['nextCursor'])
 		}
+
 		setIsLoading(false)
 	}, [patientId])
+
+	const nextPatientVisits = async () => {
+		const visitResp = await getPatientVisits(patientId, nextCursor)
+		if (visitResp['errorMessage'])
+			showErrorPopup(visitResp['errorMessage'])
+		else {
+			setPatientVisits([...patientVisits, ...visitResp['result']['results']])
+			setNextCursor(visitResp['result']['nextCursor'])
+		}
+	}
 
 	const [isEditingProfile, setIsEditingProfile] = useState(false)
 
@@ -89,6 +111,21 @@ function VisitPage() {
 		}
 	}
 
+	const newVisit = async ({ diagnosis }) => {
+		setIsLoading(true)
+		const resp = await insertVisit({
+			patientId: patient.id,
+			diagnosis: diagnosis,
+		})
+		if (resp['errorMessage'])
+			showErrorPopup(resp['errorMessage'])
+		else {
+			showSuccessPopup('Patient updated')
+			setPatientVisits([resp['result'], ...patientVisits])
+		}
+		setIsLoading(false)
+	}
+
 	return <Container>
 		{isLoading && <div style={{ textAlign: 'center' }}>
 			<Spinner animation="border" role="status"><span className="visually-hidden">Loading...</span></Spinner>
@@ -112,15 +149,14 @@ function VisitPage() {
 
 		{!isNewPatientPage && <>
 			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>New Entry</h5>
-			<NewVisit />
+			<NewVisit onSubmit={newVisit} />
 
-			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>
-			<Visit />
-			<Visit />
+			{patientVisits.length > 0 && <h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>}
+			{patientVisits.map(patientVisit => <Visit patientVisit={patientVisit} />)}
 
-			<Row style={{ marginBottom: 20 }}>
-				<Button variant="link">Load more...</Button>
-			</Row>
+			{nextCursor && <Row style={{ marginBottom: 20 }}>
+				<Button variant="link" onClick={nextPatientVisits}>Load more...</Button>
+			</Row>}
 		</>}
 	</Container>
 }
@@ -238,8 +274,13 @@ function ProfileEditor({ patient, onSubmit }) {
 	</Form>
 }
 
-function NewVisit() {
-	const [editorState, setEditorState] = useState();
+function NewVisit({ onSubmit }) {
+	const [editorState, setEditorState] = useState(EditorState.createEmpty());
+	const submit = () => {
+		onSubmit({
+			'diagnosis': draftToHtml(convertToRaw(editorState.getCurrentContent())),
+		})
+	}
 	return (
 		<Card style={{ marginBottom: 20 }}>
 			<Card.Header>August, 17 2021 (yesterday)</Card.Header>
@@ -253,27 +294,18 @@ function NewVisit() {
 				/>
 			</Card.Body>
 			<Card.Footer style={{ textAlign: "right" }}>
-				<Button variant="primary">Submit</Button>
+				<Button variant="primary" onClick={submit}>Submit</Button>
 			</Card.Footer>
 		</Card>
 	)
 }
 
-function Visit() {
+function Visit({ patientVisit }) {
 	return (
 		<Card style={{ marginBottom: 20 }}>
-			<Card.Header>August, 17 2021 (yesterday)</Card.Header>
+			<Card.Header>{moment(patientVisit['date']).format('LL')}</Card.Header>
 			<Card.Body>
-				<blockquote className="blockquote mb-0">
-					<p>
-						{' '}
-						Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer posuere
-						erat a ante.{' '}
-					</p>
-					<footer className="blockquote-footer">
-						Someone famous in <cite title="Source Title">Source Title</cite>
-					</footer>
-				</blockquote>
+				<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
 			</Card.Body>
 			<Card.Footer style={{ textAlign: "right" }}>
 				<Button variant="link"><BsPencil /></Button>

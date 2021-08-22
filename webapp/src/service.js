@@ -45,3 +45,22 @@ export async function putPatient(patient) {
 		then(res => res.json()).
 		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
 }
+
+export async function insertVisit(patientVisit) {
+	return fetch(`${baseURL}/patients/${patientVisit['patientId']}/visits/`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(patientVisit),
+		mode: 'cors',
+		crossDomain: true,
+	}).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
+}
+
+export async function getPatientVisits(patientId, cursor) {
+	return fetch(`${baseURL}/patients/${patientId}/visits/?` + new URLSearchParams({ cursor })).
+		then(res => res.json()).
+		catch(_ => ({ 'errorMessage': 'Something went wrong' }))
+}
+
