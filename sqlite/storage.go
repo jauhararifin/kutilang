@@ -131,7 +131,7 @@ type scanner interface {
 
 func (d *db) scanPatient(row scanner) (patient.Profile, error) {
 	result := patient.Profile{}
-	lastVisitUnix := int32(0)
+	lastVisitUnix := int64(0)
 	if err := row.Scan(
 		&result.ID,
 		&result.Name,
@@ -145,7 +145,7 @@ func (d *db) scanPatient(row scanner) (patient.Profile, error) {
 		}
 		return patient.Profile{}, err
 	}
-	result.LastVisit = time.Unix(int64(lastVisitUnix), 0)
+	result.LastVisit = time.Unix(lastVisitUnix, 0)
 
 	return result, nil
 }
@@ -378,7 +378,7 @@ func (d *db) GetPatientVisits(
 
 func (d *db) scanPatientVisit(row scanner) (patient.Visit, error) {
 	result := patient.Visit{}
-	timestamp := int32(0)
+	timestamp := int64(0)
 	if err := row.Scan(
 		&result.ID,
 		&result.PatientID,
