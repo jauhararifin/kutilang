@@ -1,57 +1,252 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useHistory } from 'react-router-dom';
 import Container from 'react-bootstrap/Container';
+import Spinner from 'react-bootstrap/Spinner';
 import Table from 'react-bootstrap/Table';
 import Card from 'react-bootstrap/Card';
+import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 import Row from 'react-bootstrap/Row';
+import Form from 'react-bootstrap/Form';
+import InputGroup from 'react-bootstrap/InputGroup';
+import FormControl from 'react-bootstrap/FormControl';
 import { BsPencil, BsTrash } from "react-icons/bs";
 import { Editor } from "react-draft-wysiwyg";
+import { useParams } from "react-router-dom";
+import { useFormik } from 'formik';
+import 'moment/locale/id';
+import moment from 'moment';
+import * as Yup from 'yup';
+import Noty from 'noty';
+import axios from 'axios';
+import {getPatient, postPatient, putPatient} from '../service';
 
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
 
+const baseURL = "http://localhost:5000"
+
+function showSuccessPopup(text) {
+	new Noty({text: text, layout: 'topCenter', type:'success', theme: 'bootstrap-v4'}).show();
+}
+
+function showErrorPopup(text) {
+	new Noty({text: text, layout: 'topCenter', type:'error', theme: 'bootstrap-v4'}).show();
+}
+
 function VisitPage() {
+	const history = useHistory();
+	const { patientId } = useParams()
+	const isNewPatientPage = !patientId
+	const [isLoading, setIsLoading] = useState(false)
+
+	const [patient, setPatient] = useState(null)
+	useEffect(async () => {
+		if (!patientId) return
+		setIsLoading(true)
+		const result = await getPatient(patientId)
+		if (result['errorMessage']) {
+			showErrorPopup(result['errorMessage'])
+		} else {
+			setPatient(result['result'])
+		}
+		setIsLoading(false)
+	}, [patientId])
+
+	const [isEditingProfile, setIsEditingProfile] = useState(false)
+
+	const createProfile = async (patient) => {
+		setIsLoading(true)
+		const resp = await postPatient(patient)
+		if (resp['errorMessage'])
+			showErrorPopup(resp['errorMessage'])
+		else {
+			showSuccessPopup('Patient added')
+			history.replace(`/patients/${resp['result']['id']}`)
+		}
+		setIsLoading(false)
+	}
+
+	const updateProfile = async (patient) => {
+		setIsLoading(true)
+		const resp = await putPatient(patient)
+		if (resp['errorMessage'])
+			showErrorPopup(resp['errorMessage'])
+		else {
+			showSuccessPopup('Patient updated')
+			setIsEditingProfile(false)
+			setPatient(patient)
+		}
+		setIsLoading(false)
+	}
+
+	const editProfile = (patient) => {
+		setIsEditingProfile(true)
+	}
+
+	const deleteProfile = async (patient) => {
+		if (!window.confirm('Are you sure you want to delete this patient?'))
+			return
+
+		try {
+			const result = await axios.delete(`${baseURL}/api/v1/patients/${patientId}`).then(res => res.data)
+			if (result['errorMessage']) {
+				new Noty({text: result['errorMessage'], layout: 'topCenter', type:'error'}).show();
+			} else {
+				new Noty({text: 'Patient deleted', layout: 'topCenter', type:'success'}).show();
+				history.push("/")
+			}
+		} catch (e) {
+			new Noty({text: 'Something went wrong', layout: 'topCenter', type:'error'}).show();
+		}
+	}
+
 	return <Container>
-		<h5 style={{ textAlign: "center", marginBottom: 30, }}>Profile</h5>
-		<Profile />
+		{ isLoading && <div style={{textAlign:'center'}}>
+			<Spinner animation="border" role="status"><span className="visually-hidden">Loading...</span></Spinner>
+		</div>}
 
-		<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>New Entry</h5>
-		<NewVisit />
+		{isNewPatientPage && <>
+			<h5 style={{ textAlign: "center", marginBottom: 30, }}>New Profile</h5>
+			<ProfileEditor patient={patient} onSubmit={createProfile} />
+		</>}
 
-		<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>
-		<Visit />
-		<Visit />
+		{(!isNewPatientPage && isEditingProfile) && <>
+			<h5 style={{ textAlign: "center", marginBottom: 30, }}>Update Profile</h5>
+			<ProfileEditor patient={patient} onSubmit={updateProfile} />
+		</>}
 
-		<Row style={{marginBottom: 20}}>
-			<Button variant="link">Load more...</Button>
-		</Row>
+		{!isNewPatientPage && !!patient && !isEditingProfile && <>
+			<h5 style={{ textAlign: "center", marginBottom: 30, }}>Profile</h5>
+			<Profile patient={patient} onEdit={editProfile} onDelete={deleteProfile} />
+		</>}
+
+
+		{!isNewPatientPage && <>
+			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>New Entry</h5>
+			<NewVisit />
+
+			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>
+			<Visit />
+			<Visit />
+
+			<Row style={{marginBottom: 20}}>
+				<Button variant="link">Load more...</Button>
+			</Row>
+		</>}
 	</Container>
 }
 
-function Profile() {
+function Profile({patient, onEdit, onDelete}) {
 	return <Table striped bordered hover>
 		<tbody>
 			<tr>
 				<th style={{ width: 200 }}>Name</th>
-				<td>Lorem</td>
+				<td>{patient.name}</td>
 			</tr>
 			<tr>
 				<th>Family Name</th>
-				<td>Ipsum</td>
+				<td>{patient.headFamilyName}</td>
 			</tr>
 			<tr>
 				<th>Birthdate</th>
-				<td>June, 18 1997 (24 years old)</td>
+				<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} years old)</td>
 			</tr>
 			<tr>
 				<th>Address</th>
-				<td>Perum kutilangsari</td>
+				<td>{patient['address']}</td>
 			</tr>
 			<tr>
 				<th>Last Visit</th>
-				<td>August, 17 2021 (yesterday)</td>
+				<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
+			</tr>
+			<tr>
+				<td colSpan={2} style={{textAlign: "right"}}>
+					<Button variant="secondary" onClick={onEdit}>Edit</Button>{' '}
+					<Button variant="danger" onClick={onDelete}>Delete</Button>
+				</td>
 			</tr>
 		</tbody>
-	</Table>;
+	</Table>
+}
+
+function ProfileEditor({patient, onSubmit}) {
+	patient = patient || {}
+	const lastVisit = patient['lastVisit'] ? moment(patient['lastVisit']) : moment()
+	const formik = useFormik({
+		initialValues: {
+			name: patient['name'] || '',
+			headFamilyName: patient['headFamilyName'] || '',
+			birthDate: patient['birthDate'] || '',
+			address: patient['address'] || '',
+		},
+		validationSchema: Yup.object({
+			name: Yup.string().max(255, 'Maximum at 255 character').required('Required'),
+			headFamilyName: Yup.string().max(255, 'Maximum at 255 character'),
+			birthDate: Yup.date().required().max(new Date(), 'Invalid date'),
+			address: Yup.string().max(4096).required('Required'),
+		}),
+		onSubmit: onSubmit,
+	});
+
+	return <Form onSubmit={formik.handleSubmit}>
+		<Table striped bordered hover>
+			<tbody>
+				<tr>
+					<th style={{ width: 200 }}>Name</th>
+					<td>
+						<InputGroup>
+							<Form.Control type="input" {...formik.getFieldProps('name')} isInvalid={formik.touched.name && formik.errors.name} />
+							<Form.Control.Feedback type="invalid">
+								{formik.touched.name && formik.errors.name}
+							</Form.Control.Feedback>
+						</InputGroup>
+					</td>
+				</tr>
+				<tr>
+					<th>Family Name</th>
+					<td>
+						<InputGroup>
+							<Form.Control type="input" {...formik.getFieldProps('headFamilyName')} isInvalid={formik.touched.headFamilyName && formik.errors.headFamilyName} />
+							<Form.Control.Feedback type="invalid">
+								{formik.touched.headFamilyName && formik.errors.headFamilyName}
+							</Form.Control.Feedback>
+						</InputGroup>
+					</td>
+				</tr>
+				<tr>
+					<th>Birthdate</th>
+					<td>
+						<InputGroup>
+							<Form.Control type="date" {...formik.getFieldProps('birthDate')} isInvalid={formik.touched.birthDate && formik.errors.birthDate} />
+							<Form.Control.Feedback type="invalid">
+								{formik.touched.birthDate && formik.errors.birthDate}
+							</Form.Control.Feedback>
+						</InputGroup>
+					</td>
+				</tr>
+				<tr>
+					<th>Address</th>
+					<td>
+						<InputGroup>
+							<Form.Control as="textarea" row={3} name="address" {...formik.getFieldProps('address')} isInvalid={formik.touched.address && formik.errors.address} />
+							<Form.Control.Feedback type="invalid">
+								{formik.touched.address && formik.errors.address}
+							</Form.Control.Feedback>
+						</InputGroup>
+					</td>
+				</tr>
+				<tr>
+					<th>Last Visit</th>
+					<td>{lastVisit.format('LL')}</td>
+				</tr>
+				<tr>
+					<td colSpan={2} style={{textAlign: "right"}}>
+						<Button variant="success" type="submit">Save</Button>
+					</td>
+				</tr>
+			</tbody>
+		</Table>
+	</Form>
 }
 
 function NewVisit() {

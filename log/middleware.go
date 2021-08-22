@@ -16,7 +16,14 @@ func NewMiddleware(l Log) func (http.Handler) http.Handler {
 			r = r.WithContext(context.WithValue(r.Context(), "requestID", reqID))
 
 			defer func(t time.Time) {
-				l.Log(r.Context(), "access", "latency", time.Since(t), "path", r.URL.String(), "method", r.Method)
+				l.Log(
+					r.Context(),
+					"access",
+					"latency", time.Since(t),
+					"path", r.URL.String(),
+					"method", r.Method,
+					"headers", w.Header(),
+				)
 			}(time.Now())
 
 			h.ServeHTTP(w, r)

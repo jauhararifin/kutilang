@@ -59,6 +59,8 @@ LIMIT ?
 
 const insertVisitSQL = "INSERT INTO visits (id, patient_id, timestamp, diagnosis, is_deleted) VALUES (?,?,?,?,?)"
 
+const updatePatientLastVisitSQL = "UPDATE patients SET last_visit=? WHERE id=?"
+
 const updateVisitSQL = "UPDATE visits SET timestamp=?, diagnosis=? WHERE id=?"
 
 const deleteVisitSQL = "UPDATE visits SET is_deleted=true WHERE id=?"

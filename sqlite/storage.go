@@ -330,6 +330,15 @@ func (d *db) InsertPatientVisit(ctx context.Context, patientVisit patient.Visit)
 		return fmt.Errorf("cannot exec insert sql: %w", err)
 	}
 
+	if _, err := tx.ExecContext(
+		ctx,
+		updatePatientLastVisitSQL,
+		patientVisit.Date.Unix(),
+		patientVisit.PatientID,
+	); err != nil {
+		return fmt.Errorf("cannot exec update patient sql: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("error commiting transaction: %w", err)
 	}

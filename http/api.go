@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
 	"github.com/jauhararifin/kutilang/log"
@@ -30,10 +29,22 @@ func (h *handler) Start(addr string) error {
 	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleUpdatePatientVisit).Methods("PUT")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
-	router.Use(log.NewMiddleware(h.logger))
-	router.Use(handlers.CORS())
+	handler := (func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add("Access-Control-Allow-Origin", "*")
+			w.Header().Add("Access-Control-Allow-Headers", "*")
 
-	return http.ListenAndServe(addr, router)
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(200)
+				return
+			}
+
+			h.ServeHTTP(w, r)
+		})
+	})(router)
+	handler = log.NewMiddleware(h.logger)(handler)
+
+	return http.ListenAndServe(addr, handler)
 }
 
 func (h *handler) handleInsertPatient(w http.ResponseWriter, req *http.Request) {
@@ -80,7 +91,7 @@ func (h *handler) handleSearchPatient(w http.ResponseWriter, req *http.Request) 
 	query := req.FormValue("q")
 	cursor := req.FormValue("cursor")
 
-	result, err := h.service.SearchPatient(req.Context(), query, patient.SearchOption{Cursor: cursor, BatchSize: 30})
+	result, err := h.service.SearchPatient(req.Context(), query, patient.SearchOption{Cursor: cursor, BatchSize: 2})
 	if err != nil {
 		h.writeResult(w, nil, fmt.Errorf("cannot search patient: %w", err))
 		return
