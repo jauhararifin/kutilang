@@ -87,7 +87,7 @@ function VisitPage() {
 
 	const updateProfile = async (newPatient) => {
 		setIsLoading(true)
-		const resp = await putPatient({...newPatient, id: patient.id})
+		const resp = await putPatient({ ...newPatient, id: patient.id })
 		if (resp['errorMessage'])
 			showErrorPopup(resp['errorMessage'])
 		else {
@@ -129,23 +129,28 @@ function VisitPage() {
 		setIsLoading(false)
 	}
 
-	const updateVisit = async ({id, diagnosis}) => {
+	const updateVisit = async ({ id, diagnosis, date }) => {
 		setIsLoading(true)
+		let success = false
 		const resp = await putVisit({
 			id: id,
 			patientId: patient.id,
+			date: date,
 			diagnosis: diagnosis,
 		})
-		if (resp['errorMessage'])
+		if (resp['errorMessage']) {
 			showErrorPopup(resp['errorMessage'])
-		else {
+			success = false
+		} else {
 			showSuccessPopup('Visit updated')
-			setPatientVisits(patientVisits.map(pv => pv.id == id ? resp['result'] : pv))
+			setPatientVisits(patientVisits.map(pv => pv.id === id ? resp['result'] : pv))
+			success = true
 		}
 		setIsLoading(false)
+		return success
 	}
 
-	const removeVisit = async ({id, patientId}) => {
+	const removeVisit = async ({ id, patientId }) => {
 		setIsLoading(true)
 		const resp = await deleteVisit({
 			id: id,
@@ -155,7 +160,7 @@ function VisitPage() {
 			showErrorPopup(resp['errorMessage'])
 		else {
 			showSuccessPopup('Visit deleted')
-			setPatientVisits(patientVisits.filter(pv => pv.id != id ))
+			setPatientVisits(patientVisits.filter(pv => pv.id != id))
 		}
 		setIsLoading(false)
 	}
@@ -189,8 +194,8 @@ function VisitPage() {
 			{patientVisits.map(patientVisit => <Visit
 				key={patientVisit.id}
 				patientVisit={patientVisit}
-				onSubmit={pv => updateVisit({...pv, id: patientVisit.id})}
-				onDelete={_ => removeVisit({id: patientVisit.id, patientId: patientVisit.patientId})}
+				onSubmit={pv => updateVisit({ ...pv, id: patientVisit.id })}
+				onDelete={_ => removeVisit({ id: patientVisit.id, patientId: patientVisit.patientId })}
 			/>)}
 
 			{nextCursor && <Row style={{ marginBottom: 20 }}>
@@ -313,10 +318,14 @@ function ProfileEditor({ patient, onSubmit }) {
 	</Form>
 }
 
-function Visit({onSubmit, onDelete, patientVisit}) {
+function Visit({ onSubmit, onDelete, patientVisit }) {
 	const [isEditing, setIsEditing] = useState(false)
-	return isEditing ? 
-		<VisitEditor onSubmit={onSubmit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
+	const submit = async (...args) => {
+		const success = await onSubmit(...args)
+		if (success) setIsEditing(false)
+	}
+	return isEditing ?
+		<VisitEditor onSubmit={submit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
 		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patientVisit={patientVisit} />
 }
 
@@ -360,7 +369,7 @@ function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 	return (
 		<Card style={{ marginBottom: 20 }}>
 			<Card.Body style={{ padding: 10 }}>
-				<FormControl type="date" value={date} onChange={ev => setDate(ev.target.value)} style={{marginBottom: 10}}/>
+				<FormControl type="date" value={date} onChange={ev => setDate(ev.target.value)} style={{ marginBottom: 10 }} />
 				<Editor
 					editorState={editorState}
 					onEditorStateChange={setEditorState}

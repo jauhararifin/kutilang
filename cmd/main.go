@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"github.com/getlantern/systray"
 
 	"github.com/jauhararifin/kutilang/core"
 	"github.com/jauhararifin/kutilang/http"
@@ -57,9 +58,23 @@ func runServer(cmd *cobra.Command, args []string) {
 	controller := core.NewController(storage, logger)
 	server := http.NewHandler(controller, logger)
 
-	logger.Log(context.Background(), "starting http server at port 5000")
+	go func() {
+		systray.Run(func() {
+			quit := systray.AddMenuItem("Quit", "Quit the whole app")
+			systray.SetTitle("Klinik Kutilang")
+			go func() {
+				<- quit.ClickedCh
+				systray.Quit()
+			}()
+		}, func() {})
+
+		server.Stop()
+	}()
+
+	ctx := context.Background()
+	logger.Log(ctx, "starting http server at port 5000")
 	if err := server.Start(":5000"); err != nil {
-		panic(fmt.Errorf("cannot start http: %w", err))
+		logger.Log(ctx, "server stopped", "err", err)
 	}
 }
 

@@ -2,9 +2,7 @@ package core
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 	"time"
@@ -165,14 +163,14 @@ func (c *controller) getKeywordsFromQuery(query string) []string {
 }
 
 func (c *controller) parsePatientCursor(cursor string) (lastVisit string, lastaPatientID string, err error) {
-	now := time.Now().Local().Format("2006-01-02")
+	infiniteDate := "9999-12-31"
 	if cursor == "" {
-		return now, "", nil
+		return infiniteDate, "", nil
 	}
 
 	parts := strings.Split(cursor, ".")
 	if len(parts) != 2 {
-		return now, "", fmt.Errorf("invalid format")
+		return infiniteDate, "", fmt.Errorf("invalid format")
 	}
 
 	return parts[0], parts[1], nil
@@ -267,14 +265,14 @@ func (c *controller) GetPatientVisits(ctx context.Context, patientID string, opt
 }
 
 func (c *controller) parsePatientVisitCursor(cursor string) (lastVisit string, id string, err error) {
-	now := time.Now().Local().Format("2006-01-02")
+	infiniteDate := "9999-12-31"
 	if cursor == "" {
-		return now, "", nil
+		return infiniteDate, "", nil
 	}
 
 	parts := strings.Split(cursor, ".")
 	if len(parts) != 2 {
-		return now, "", fmt.Errorf("invalid format")
+		return infiniteDate, "", fmt.Errorf("invalid format")
 	}
 
 	return parts[0], parts[1], nil

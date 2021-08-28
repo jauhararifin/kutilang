@@ -57,10 +57,11 @@ type Service interface {
 
 type BackupService interface {
 	BackupPatients(ctx context.Context, w io.Writer) error
-	RestorePatients(ctx context.Context, r io.Reader) error
-	BackupVisits(ctx context.Context, w io.Writer) error
-	RestoreVisits(ctx context.Context, r io.Reader) error
 
-	BackupAll(ctx context.Context, w io.Writer) error
-	RestoreAll(ctx context.Context, r io.Reader) error
+	// TODO (jauhar.arifin): add these methods
+	//BackupVisits(ctx context.Context, w io.Writer) error
+	//RestorePatients(ctx context.Context, r io.Reader) error
+	//RestoreVisits(ctx context.Context, r io.Reader) error
+	//BackupAll(ctx context.Context, w io.Writer) error
+	//RestoreAll(ctx context.Context, r io.Reader) error
 }

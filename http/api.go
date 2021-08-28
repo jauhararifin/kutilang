@@ -15,6 +15,8 @@ type handler struct {
 	service       patient.Service
 	backupService patient.BackupService
 	logger        log.Log
+
+	httpServer *http.Server
 }
 
 func (h *handler) Start(addr string) error {
@@ -47,7 +49,15 @@ func (h *handler) Start(addr string) error {
 	})(router)
 	handler = log.NewMiddleware(h.logger)(handler)
 
-	return http.ListenAndServe(addr, handler)
+	h.httpServer = &http.Server{Addr: addr, Handler: handler}
+	return h.httpServer.ListenAndServe()
+}
+
+func (h *handler) Stop() error {
+	if h.httpServer != nil {
+		return h.httpServer.Close()
+	}
+	return fmt.Errorf("server not started")
 }
 
 func (h *handler) handleInsertPatient(w http.ResponseWriter, req *http.Request) {

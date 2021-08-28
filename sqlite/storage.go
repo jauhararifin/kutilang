@@ -434,6 +434,7 @@ func (d *db) UpdatePatientVisit(ctx context.Context, patientVisit patient.Visit)
 	if _, err := d.conn.ExecContext(
 		ctx,
 		updateVisitSQL,
+		patientVisit.Date,
 		patientVisit.Diagnosis,
 		patientVisit.ID,
 		false,

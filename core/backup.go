@@ -37,10 +37,6 @@ func (c *backupController) BackupPatients(ctx context.Context, w io.Writer) erro
 	return csvWriter.Error()
 }
 
-func (c *backupController) RestorePatients(ctx context.Context, r io.Reader) error {
-
-}
-
 func NewBackupController(storage Storage, logger log.Log) *backupController {
 	return &backupController{storage: storage, logger: logger}
 }
