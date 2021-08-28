@@ -12,8 +12,9 @@ import (
 )
 
 type handler struct {
-	service patient.Service
-	logger  log.Log
+	service       patient.Service
+	backupService patient.BackupService
+	logger        log.Log
 }
 
 func (h *handler) Start(addr string) error {
@@ -27,6 +28,7 @@ func (h *handler) Start(addr string) error {
 	router.Path("/api/v1/patients/{patientID}/visits/").HandlerFunc(h.handleGetPatientVisit).Methods("GET")
 	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleDeletePatientVisit).Methods("DELETE")
 	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleUpdatePatientVisit).Methods("PUT")
+	router.Path("/api/v1/backup/patients/").HandlerFunc(h.handleBackupPatients).Methods("GET")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
 	handler := (func(h http.Handler) http.Handler {
@@ -207,6 +209,16 @@ func (h *handler) handleDeletePatientVisit(w http.ResponseWriter, req *http.Requ
 	}
 
 	h.writeResult(w, nil, nil)
+}
+
+func (h *handler) handleBackupPatients(w http.ResponseWriter, req *http.Request) {
+	if err := h.backupService.BackupPatients(req.Context(), w); err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot download patient data: %w", err))
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Header().Add("Content-Type", "text/csv")
 }
 
 func NewHandler(service patient.Service, logger log.Log) *handler {

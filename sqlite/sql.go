@@ -7,14 +7,14 @@ create table if not exists patients (
 	head_family_name text,
 	birth_date text,
 	address text,
-	last_visit integer,
+	last_visit text,
 	is_deleted bool
 );
 create index if not exists patients_id_idx on patients(id, last_visit);
 
 create table if not exists patient_indices (
 	keyword text,
-	last_visit integer,
+	last_visit text,
 	patient_id text
 );
 create index if not exists patient_indices_idx on patient_indices(keyword, last_visit, patient_id);
@@ -22,7 +22,7 @@ create index if not exists patient_indices_idx on patient_indices(keyword, last_
 create table if not exists visits (
 	id text primary key,
 	patient_id text,
-	timestamp integer,
+	timestamp text,
 	diagnosis text,
 	is_deleted bool
 );
@@ -31,6 +31,8 @@ create index if not exists visits_id_idx on visits(id);
 `
 
 const getPatientSQL = "SELECT id,name,head_family_name,birth_date,address,last_visit FROM patients WHERE id=? AND is_deleted=false"
+
+const getAllPatientsSQL = "SELECT id,name,head_family_name,birth_date,address,last_visit FROM patients WHERE is_deleted=false ORDER BY id"
 
 const insertPatientSQL = "INSERT INTO patients (id, name, head_family_name, birth_date, address, last_visit, is_deleted) VALUES (?,?,?,?,?,?,?)"
 

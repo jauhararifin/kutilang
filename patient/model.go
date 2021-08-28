@@ -2,16 +2,16 @@ package patient
 
 import (
 	"context"
-	"time"
+	"io"
 )
 
 type Profile struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	HeadFamilyName string    `json:"headFamilyName"`
-	Birthdate      string    `json:"birthDate"`
-	Address        string    `json:"address"`
-	LastVisit      time.Time `json:"lastVisit"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	HeadFamilyName string `json:"headFamilyName"`
+	Birthdate      string `json:"birthDate"`
+	Address        string `json:"address"`
+	LastVisit      string `json:"lastVisit"`
 }
 
 type SearchResult struct {
@@ -25,15 +25,15 @@ type SearchOption struct {
 }
 
 type Visit struct {
-	ID        string    `json:"id"`
-	PatientID string    `json:"patientId"`
-	Date      time.Time `json:"date"`
-	Diagnosis string    `json:"diagnosis"`
-	IsDeleted bool      `json:"isDeleted"`
+	ID        string `json:"id"`
+	PatientID string `json:"patientId"`
+	Date      string `json:"date"`
+	Diagnosis string `json:"diagnosis"`
+	IsDeleted bool   `json:"isDeleted"`
 }
 
 type VisitQueryOption struct {
-	BatchSize int 
+	BatchSize  int
 	NextCursor string
 }
 
@@ -53,4 +53,14 @@ type Service interface {
 	GetPatientVisits(ctx context.Context, patientID string, option VisitQueryOption) (VisitQueryResult, error)
 	DeletePatientVisit(ctx context.Context, visitID string) error
 	UpdatePatientVisit(ctx context.Context, patientVisit Visit) (Visit, error)
+}
+
+type BackupService interface {
+	BackupPatients(ctx context.Context, w io.Writer) error
+	RestorePatients(ctx context.Context, r io.Reader) error
+	BackupVisits(ctx context.Context, w io.Writer) error
+	RestoreVisits(ctx context.Context, r io.Reader) error
+
+	BackupAll(ctx context.Context, w io.Writer) error
+	RestoreAll(ctx context.Context, r io.Reader) error
 }

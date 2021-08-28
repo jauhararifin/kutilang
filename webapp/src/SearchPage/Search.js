@@ -84,23 +84,23 @@ function SearchTableResultView({isLoading, patients, hasNext, loadNext}) {
 		<Table striped bordered hover>
 			<thead>
 				<tr>
-					<th>Name</th>
-					<th>Family Name</th>
-					<th>Date Birth</th>
-					<th>Address</th>
-					<th>Last Visit</th>
+					<th>Nama</th>
+					<th>Nama KK</th>
+					<th>Tanggal Lahir</th>
+					<th>Alamat</th>
+					<th>Kunjungan Terakhir</th>
 				</tr>
 			</thead>
 			<tbody>
 				{ !isLoading && patients.length == 0 && <tr>
-					<td colSpan={5} align="center">No patient found</td>
+					<td colSpan={5} align="center">Tidak ditemukan pasien</td>
 				</tr> }
 
 				{ patients.map(patient => (
 					<tr key={patient.id} style={{cursor: 'pointer'}} onClick={()=>history.push(`/patients/${patient.id}`)}>
 						<td>{patient['name']}</td>
 						<td>{patient['headFamilyName']}</td>
-						<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} years old)</td>
+						<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} tahun)</td>
 						<td>{patient['address']}</td>
 						<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
 					</tr>

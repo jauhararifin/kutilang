@@ -10,6 +10,7 @@ import Button from 'react-bootstrap/Button';
 import Card from 'react-bootstrap/Card';
 import Container from 'react-bootstrap/Container';
 import Form from 'react-bootstrap/Form';
+import FormControl from 'react-bootstrap/FormControl';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Row from 'react-bootstrap/Row';
 import Spinner from 'react-bootstrap/Spinner';
@@ -112,10 +113,11 @@ function VisitPage() {
 		}
 	}
 
-	const newVisit = async ({ diagnosis }) => {
+	const newVisit = async ({ diagnosis, date }) => {
 		setIsLoading(true)
 		const resp = await insertVisit({
 			patientId: patient.id,
+			date: date,
 			diagnosis: diagnosis,
 		})
 		if (resp['errorMessage'])
@@ -181,14 +183,14 @@ function VisitPage() {
 
 		{!isNewPatientPage && <>
 			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>New Entry</h5>
-			<VisitView onSubmit={newVisit} />
+			<VisitEditor onSubmit={newVisit} />
 
 			{patientVisits.length > 0 && <h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>}
-			{patientVisits.map(patientVisit => <VisitView
+			{patientVisits.map(patientVisit => <Visit
 				key={patientVisit.id}
 				patientVisit={patientVisit}
 				onSubmit={pv => updateVisit({...pv, id: patientVisit.id})}
-				onDelete={pv => removeVisit({id: patientVisit.id, patientId: patientVisit.patientId})}
+				onDelete={_ => removeVisit({id: patientVisit.id, patientId: patientVisit.patientId})}
 			/>)}
 
 			{nextCursor && <Row style={{ marginBottom: 20 }}>
@@ -202,23 +204,23 @@ function Profile({ patient, onEdit, onDelete }) {
 	return <Table striped bordered hover>
 		<tbody>
 			<tr>
-				<th style={{ width: 200 }}>Name</th>
+				<th style={{ width: 200 }}>Nama</th>
 				<td>{patient.name}</td>
 			</tr>
 			<tr>
-				<th>Family Name</th>
+				<th>Nama KK</th>
 				<td>{patient.headFamilyName}</td>
 			</tr>
 			<tr>
-				<th>Birthdate</th>
+				<th>Tanggal Lahir</th>
 				<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} years old)</td>
 			</tr>
 			<tr>
-				<th>Address</th>
+				<th>Alamat</th>
 				<td>{patient['address']}</td>
 			</tr>
 			<tr>
-				<th>Last Visit</th>
+				<th>Kunjungan Terakhir</th>
 				<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
 			</tr>
 			<tr>
@@ -311,7 +313,34 @@ function ProfileEditor({ patient, onSubmit }) {
 	</Form>
 }
 
-function VisitView({ onSubmit, onDelete, patientVisit }) {
+function Visit({onSubmit, onDelete, patientVisit}) {
+	const [isEditing, setIsEditing] = useState(false)
+	return isEditing ? 
+		<VisitEditor onSubmit={onSubmit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
+		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patientVisit={patientVisit} />
+}
+
+function VisitView({ onDelete, onEdit, patientVisit }) {
+	const date = moment(patientVisit['date'])
+	const dateStr = date.format('LL') + ' (' + date.fromNow() + ')'
+
+	return (
+		<Card style={{ marginBottom: 20 }}>
+			<Card.Header>{dateStr}</Card.Header>
+
+			<Card.Body>
+				<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
+			</Card.Body>
+
+			<Card.Footer style={{ textAlign: "right" }}>
+				<Button variant="link" onClick={onEdit}><BsPencil /></Button>
+				<Button variant="link" onClick={onDelete}><BsTrash /></Button>
+			</Card.Footer>
+		</Card>
+	)
+}
+
+function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 	const [editorState, setEditorState] = useState(
 		!!patientVisit ? EditorState.createWithContent(
 			ContentState.createFromBlockArray(
@@ -319,20 +348,19 @@ function VisitView({ onSubmit, onDelete, patientVisit }) {
 			)
 		) : EditorState.createEmpty()
 	);
-	const [isEditing, setIsEditing] = useState(!patientVisit)
-	const date = patientVisit ? moment(patientVisit['date']) : moment()
-	const dateStr = patientVisit ? date.format('LL') + ' (' + date.fromNow() + ')' : date.format('LL')
+	const [date, setDate] = useState(patientVisit ? patientVisit['date'] : new Date().toISOString().slice(0, 10))
 
 	const submit = () => {
 		onSubmit({
+			'date': date,
 			'diagnosis': draftToHtml(convertToRaw(editorState.getCurrentContent())),
 		})
 	}
+
 	return (
 		<Card style={{ marginBottom: 20 }}>
-			<Card.Header>{dateStr}</Card.Header>
-
-			{!!isEditing && <Card.Body style={{ padding: 0 }}>
+			<Card.Body style={{ padding: 10 }}>
+				<FormControl type="date" value={date} onChange={ev => setDate(ev.target.value)} style={{marginBottom: 10}}/>
 				<Editor
 					editorState={editorState}
 					onEditorStateChange={setEditorState}
@@ -340,22 +368,11 @@ function VisitView({ onSubmit, onDelete, patientVisit }) {
 					toolbarStyle={{ border: 0, padding: 0 }}
 					editorStyle={{ padding: 10 }}
 				/>
-			</Card.Body>}
-
-			{!isEditing && <Card.Body>
-				<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
-			</Card.Body>}
+			</Card.Body>
 
 			<Card.Footer style={{ textAlign: "right" }}>
-				{!!isEditing && <>
-					{patientVisit && <Button variant="secondary" onClick={() => setIsEditing(false)}>Cancel</Button>}
-					{' '}<Button variant="primary" onClick={submit}>Submit</Button>
-				</>}
-
-				{!isEditing && <>
-					<Button variant="link" onClick={() => setIsEditing(true)}><BsPencil /></Button>
-					<Button variant="link" onClick={onDelete}><BsTrash /></Button>
-				</>}
+				{onCancel && <Button variant="secondary" onClick={onCancel}>Cancel</Button>}
+				{' '}<Button variant="primary" onClick={submit}>Submit</Button>
 			</Card.Footer>
 		</Card>
 	)
