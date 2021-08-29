@@ -5,7 +5,8 @@ import htmlToDraft from 'html-to-draftjs';
 import moment from 'moment';
 import 'moment/locale/id';
 import Noty from 'noty';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import Button from 'react-bootstrap/Button';
 import Card from 'react-bootstrap/Card';
 import Container from 'react-bootstrap/Container';
@@ -18,6 +19,7 @@ import Table from 'react-bootstrap/Table';
 import { Editor } from "react-draft-wysiwyg";
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
 import { BsPencil, BsTrash } from "react-icons/bs";
+import { FaPrint } from "react-icons/fa";
 import { useHistory, useParams } from 'react-router-dom';
 import * as Yup from 'yup';
 import { deletePatient, deleteVisit, getPatient, getPatientVisits, insertVisit, postPatient, putPatient, putVisit } from '../service';
@@ -193,6 +195,7 @@ function VisitPage() {
 			{patientVisits.length > 0 && <h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>}
 			{patientVisits.map(patientVisit => <Visit
 				key={patientVisit.id}
+				patient={patient}
 				patientVisit={patientVisit}
 				onSubmit={pv => updateVisit({ ...pv, id: patientVisit.id })}
 				onDelete={_ => removeVisit({ id: patientVisit.id, patientId: patientVisit.patientId })}
@@ -318,7 +321,7 @@ function ProfileEditor({ patient, onSubmit }) {
 	</Form>
 }
 
-function Visit({ onSubmit, onDelete, patientVisit }) {
+function Visit({ onSubmit, onDelete, patient, patientVisit }) {
 	const [isEditing, setIsEditing] = useState(false)
 	const submit = async (...args) => {
 		const success = await onSubmit(...args)
@@ -326,27 +329,73 @@ function Visit({ onSubmit, onDelete, patientVisit }) {
 	}
 	return isEditing ?
 		<VisitEditor onSubmit={submit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
-		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patientVisit={patientVisit} />
+		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patient={patient} patientVisit={patientVisit} />
 }
 
-function VisitView({ onDelete, onEdit, patientVisit }) {
+function VisitView({ onDelete, onEdit, patient, patientVisit }) {
 	const date = moment(patientVisit['date'])
 	const dateStr = date.format('LL') + ' (' + date.fromNow() + ')'
 
+	const printRef = useRef();
+	const handlePrint = useReactToPrint({
+		content: () => printRef.current,
+	});
+
 	return (
-		<Card style={{ marginBottom: 20 }}>
-			<Card.Header>{dateStr}</Card.Header>
+		<>
+			<div style={{ display: "none" }}>
+				{patientVisit && <VisitViewForPrint ref={printRef} patient={patient} patientVisit={patientVisit} />}
+			</div>
+			<Card style={{ marginBottom: 20 }}>
+				<Card.Header>{dateStr}</Card.Header>
 
-			<Card.Body>
-				<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
-			</Card.Body>
+				<Card.Body>
+					<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
+				</Card.Body>
 
-			<Card.Footer style={{ textAlign: "right" }}>
-				<Button variant="link" onClick={onEdit}><BsPencil /></Button>
-				<Button variant="link" onClick={onDelete}><BsTrash /></Button>
-			</Card.Footer>
-		</Card>
+				<Card.Footer style={{ textAlign: "right" }}>
+					{patientVisit && <Button variant="link" onClick={handlePrint}><FaPrint /></Button>}
+					<Button variant="link" onClick={onEdit}><BsPencil /></Button>
+					<Button variant="link" onClick={onDelete}><BsTrash /></Button>
+				</Card.Footer>
+			</Card>
+		</>
 	)
+}
+
+class VisitViewForPrint extends React.PureComponent {
+	render() {
+		const date = moment(this.props.patientVisit['date'])
+		const dateStr = date.format('LL')
+		return (
+			<div style={{ margin: 10 }}>
+				<div style={{ width: "100%", border: "solid 1px", padding: 10 }} >
+					<table>
+						<tbody>
+							<tr style={{ padding: 10 }}>
+								<th>Nama</th>
+								<td>{this.props.patient.name} / {this.props.patient.headFamilyName}</td>
+							</tr>
+							<tr style={{ padding: 10 }}>
+								<th>Tanggal Lahir</th>
+								<td>{moment(this.props.patient['birthDate']).format('LL')}</td>
+							</tr>
+							<tr style={{ padding: 10 }}>
+								<th>Alamat</th>
+								<td>{this.props.patient['address']}</td>
+							</tr>
+							<tr style={{ padding: 10 }}>
+								<th>Kunjungan Terakhir</th>
+								<td>{moment(this.props.patient['lastVisit']).format('LL')}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				<h5 style={{textAlign: "center", paddingTop: 20}}>{dateStr}</h5>
+				<div style={{marginTop: 20, padding: 5, fontSize: 12}} dangerouslySetInnerHTML={{ __html: this.props.patientVisit.diagnosis }}></div>
+			</div>
+		);
+	}
 }
 
 function VisitEditor({ onSubmit, onCancel, patientVisit }) {

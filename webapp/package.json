@@ -21,6 +21,7 @@
     "react-icons": "^4.2.0",
     "react-router-dom": "^5.2.0",
     "react-scripts": "4.0.3",
+    "react-to-print": "^2.13.0",
     "typescript-language-server": "^0.6.1",
     "web-vitals": "^1.0.1",
     "yup": "^0.32.9"
