@@ -350,12 +350,39 @@ function VisitView({ onDelete, onEdit, patientVisit }) {
 }
 
 function VisitEditor({ onSubmit, onCancel, patientVisit }) {
+	const defaultText = `
+<h5>Subjektif</h5>
+<p>KU:</p>
+<p>RPS:</p>
+<p>RPD: . Maag (-), HT (-), DM (-), Asma (-), Alergi: , minum jamu / obat bebas (-)</p>
+<h5>Objektif</h5>
+<ul>
+	<li>Kondisi umum: Baik, Kesadaran: .</li>
+	<li>Tekanan darah: / mmgh, HR: x/mnt reguler, BB: kg, TB: cm.</li>
+	<li>Thorax: SSD, SF: ka = ki.</li>
+	<li>Pulmo: -, Ronchi: -, Wheezing: -.</li>
+	<li>Cor: -, Abd: -.</li>
+	<li>Hepar: -, Lien: -.</li>
+</ul>
+<h5>Assesment</h5>
+<ol>
+	<li></li>
+</ol>
+<h5>Planning</h5>
+<ol>
+	<li></li>
+</ol>
+`
 	const [editorState, setEditorState] = useState(
 		!!patientVisit ? EditorState.createWithContent(
 			ContentState.createFromBlockArray(
 				htmlToDraft(patientVisit.diagnosis).contentBlocks
 			)
-		) : EditorState.createEmpty()
+		) : EditorState.createWithContent(
+			ContentState.createFromBlockArray(
+				htmlToDraft(defaultText).contentBlocks
+			)
+		)
 	);
 	const [date, setDate] = useState(patientVisit ? patientVisit['date'] : new Date().toISOString().slice(0, 10))
 
