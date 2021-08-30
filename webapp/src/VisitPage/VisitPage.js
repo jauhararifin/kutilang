@@ -406,12 +406,12 @@ function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 <p>RPD: . Maag (-), HT (-), DM (-), Asma (-), Alergi: , minum jamu / obat bebas (-)</p>
 <h5>Objektif</h5>
 <ul>
-	<li>Kondisi umum: Baik, Kesadaran: .</li>
+	<li>Kondisi umum: Baik, Kesadaran: CM.</li>
 	<li>Tekanan darah: / mmgh, HR: x/mnt reguler, BB: kg, TB: cm.</li>
 	<li>Thorax: SSD, SF: ka = ki.</li>
 	<li>Pulmo: -, Ronchi: -, Wheezing: -.</li>
-	<li>Cor: -, Abd: -.</li>
-	<li>Hepar: -, Lien: -.</li>
+	<li>Cor: konfigurasi dbn, S1-S3 murni, bising (-), gallop (-).</li>
+	<li>Abd: -, venectasi (-), asites (-), Hepar: (-), Lien: (-).</li>
 </ul>
 <h5>Assesment</h5>
 <ol>
