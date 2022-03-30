@@ -86,7 +86,7 @@ function VisitPage() {
 
 	const updateProfile = async (newPatient) => {
 		setIsLoading(true)
-		const resp = await putPatient({...newPatient, id: patient.id})
+		const resp = await putPatient({ ...newPatient, id: patient.id })
 		if (resp['errorMessage'])
 			showErrorPopup(resp['errorMessage'])
 		else {
@@ -127,7 +127,7 @@ function VisitPage() {
 		setIsLoading(false)
 	}
 
-	const updateVisit = async ({id, diagnosis}) => {
+	const updateVisit = async ({ id, diagnosis }) => {
 		setIsLoading(true)
 		const resp = await putVisit({
 			id: id,
@@ -143,7 +143,7 @@ function VisitPage() {
 		setIsLoading(false)
 	}
 
-	const removeVisit = async ({id, patientId}) => {
+	const removeVisit = async ({ id, patientId }) => {
 		setIsLoading(true)
 		const resp = await deleteVisit({
 			id: id,
@@ -153,7 +153,7 @@ function VisitPage() {
 			showErrorPopup(resp['errorMessage'])
 		else {
 			showSuccessPopup('Visit deleted')
-			setPatientVisits(patientVisits.filter(pv => pv.id != id ))
+			setPatientVisits(patientVisits.filter(pv => pv.id != id))
 		}
 		setIsLoading(false)
 	}
@@ -174,7 +174,6 @@ function VisitPage() {
 		</>}
 
 		{!isNewPatientPage && !!patient && !isEditingProfile && <>
-			<h5 style={{ textAlign: "center", marginBottom: 30, }}>Profile</h5>
 			<Profile patient={patient} onEdit={editProfile} onDelete={deleteProfile} />
 		</>}
 
@@ -187,8 +186,8 @@ function VisitPage() {
 			{patientVisits.map(patientVisit => <VisitView
 				key={patientVisit.id}
 				patientVisit={patientVisit}
-				onSubmit={pv => updateVisit({...pv, id: patientVisit.id})}
-				onDelete={pv => removeVisit({id: patientVisit.id, patientId: patientVisit.patientId})}
+				onSubmit={pv => updateVisit({ ...pv, id: patientVisit.id })}
+				onDelete={pv => removeVisit({ id: patientVisit.id, patientId: patientVisit.patientId })}
 			/>)}
 
 			{nextCursor && <Row style={{ marginBottom: 20 }}>
@@ -311,7 +310,108 @@ function ProfileEditor({ patient, onSubmit }) {
 	</Form>
 }
 
-function VisitView({ onSubmit, onDelete, patientVisit }) {
+function Visit({ onSubmit, onDelete, patient, patientVisit }) {
+	const [isEditing, setIsEditing] = useState(false)
+	const submit = async (...args) => {
+		const success = await onSubmit(...args)
+		if (success) setIsEditing(false)
+	}
+	return isEditing ?
+		<VisitEditor onSubmit={submit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
+		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patient={patient} patientVisit={patientVisit} />
+}
+
+function VisitView({ onDelete, onEdit, patient, patientVisit }) {
+	const date = moment(patientVisit['date'])
+	const dateStr = date.format('LL') + ' (' + date.fromNow() + ')'
+
+	const printRef = useRef();
+	const handlePrint = useReactToPrint({
+		content: () => printRef.current,
+	});
+
+	return (
+		<>
+			<div style={{ display: "none" }}>
+				{patientVisit && <VisitViewForPrint ref={printRef} patient={patient} patientVisit={patientVisit} />}
+			</div>
+			<Card style={{ marginBottom: 20 }}>
+				<Card.Header>{dateStr}</Card.Header>
+
+				<Card.Body>
+					<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
+				</Card.Body>
+
+				<Card.Footer style={{ textAlign: "right" }}>
+					{patientVisit && <Button variant="link" onClick={handlePrint}><FaPrint /></Button>}
+					<Button variant="link" onClick={onEdit}><BsPencil /></Button>
+					<Button variant="link" onClick={onDelete}><BsTrash /></Button>
+				</Card.Footer>
+			</Card>
+		</>
+	)
+}
+
+class VisitViewForPrint extends React.PureComponent {
+	render() {
+		const date = moment(this.props.patientVisit['date'])
+		const dateStr = date.format('LL')
+		return (
+			<div style={{ margin: 10 }}>
+				<div style={{ width: "100%", border: "solid 1px", padding: 10 }} >
+					<table>
+						<tbody>
+							<tr style={{ padding: 10 }}>
+								<th>Nama</th>
+								<td>{this.props.patient.name} / {this.props.patient.headFamilyName}</td>
+							</tr>
+							<tr style={{ padding: 10 }}>
+								<th>Tanggal Lahir</th>
+								<td>{moment(this.props.patient['birthDate']).format('LL')}</td>
+							</tr>
+							<tr style={{ padding: 10 }}>
+								<th>Alamat</th>
+								<td>{this.props.patient['address']}</td>
+							</tr>
+							<tr style={{ padding: 10 }}>
+								<th>Kunjungan Terakhir</th>
+								<td>{moment(this.props.patient['lastVisit']).format('LL')}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				<h5 style={{ textAlign: "center", paddingTop: 20 }}>{dateStr}</h5>
+				<div style={{ marginTop: 20, padding: 5, fontSize: 12 }} dangerouslySetInnerHTML={{ __html: this.props.patientVisit.diagnosis }}></div>
+			</div>
+		);
+	}
+}
+
+function VisitEditor({ onSubmit, onCancel, patientVisit }) {
+	const defaultText = `
+<h5>Subjektif</h5>
+<p><strong>KU</strong>:</p>
+<p><strong>RPS</strong>:</p>
+<p><strong>RPD</strong>: Maag (-), HT (-), DM (-), Asma (-), Tipes (-), Alergi obat (-), Sakit jantung (-), minum jamu / obat bebas (-)</p>
+<h5>Objektif</h5>
+<ul>
+	<li><strong>KU</strong>: Baik, CM. <strong>TD</strong>: / mmHg, <strong>HR</strong>: x/mnt reguler, <strong>BB</strong>: kg, <strong>TB</strong>: cm.</li>
+	<li><strong>Konj</strong> anemis (-), <strong>Sclera</strong> Icterus (-). JVP R-2 cm, <strong>Kel. tiroid</strong>: dbn</li>
+	<li><strong>Thorax</strong>: SSD, SF: ka = ki. <strong>Pulmo</strong>: SD vesikuler, Ronchi: -, Wheezing: -.</li>
+	<li><strong>Cor</strong>: konfigurasi dbn, S1-S2 murni, bising (-), gallop (-).</li>
+	<li><strong>Abd</strong>: BU (+), venectasi (-), asites (-), <strong>Hepar</strong>: ttb, <strong>Lien</strong>: ttb. <strong>Nyeri ketok CF:</strong>ka (-) ki (-)</li>
+	<li><strong>Extr</strong>: edema -/-, Ulcus -/-, tremor (-), Palmar eritem (-). jari tabuh (-). ptechiae (-).</li>
+	<li><strong>GDS</strong>: mg/ml, <strong>AU</strong>: mg/ml, <strong>Kol. Total</strong>: mg/ml, <strong>EKG</strong>:
+</ul>
+<h5>Assesment</h5>
+<ol>
+	<li></li>
+</ol>
+<h5>Planning</h5>
+<ol>
+	<li></li>
+</ol>
+`
 	const [editorState, setEditorState] = useState(
 		!!patientVisit ? EditorState.createWithContent(
 			ContentState.createFromBlockArray(
