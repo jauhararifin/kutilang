@@ -5,7 +5,8 @@ import htmlToDraft from 'html-to-draftjs';
 import moment from 'moment';
 import 'moment/locale/id';
 import Noty from 'noty';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import Button from 'react-bootstrap/Button';
 import Card from 'react-bootstrap/Card';
 import Container from 'react-bootstrap/Container';
@@ -16,6 +17,7 @@ import Spinner from 'react-bootstrap/Spinner';
 import Table from 'react-bootstrap/Table';
 import { Editor } from "react-draft-wysiwyg";
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
+import { FaPrint } from "react-icons/fa";
 import { BsPencil, BsTrash } from "react-icons/bs";
 import { useHistory, useParams } from 'react-router-dom';
 import * as Yup from 'yup';
@@ -134,13 +136,16 @@ function VisitPage() {
 			patientId: patient.id,
 			diagnosis: diagnosis,
 		})
+		let result = false
 		if (resp['errorMessage'])
 			showErrorPopup(resp['errorMessage'])
 		else {
+			result = true
 			showSuccessPopup('Visit updated')
 			setPatientVisits(patientVisits.map(pv => pv.id == id ? resp['result'] : pv))
 		}
 		setIsLoading(false)
+		return result
 	}
 
 	const removeVisit = async ({ id, patientId }) => {
@@ -180,14 +185,16 @@ function VisitPage() {
 
 		{!isNewPatientPage && <>
 			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>New Entry</h5>
-			<VisitView onSubmit={newVisit} />
+			{/* <VisitView onSubmit={newVisit} /> */}
+			<Visit patient={patient} onSubmit={pv => newVisit(pv)} />
 
 			{patientVisits.length > 0 && <h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>}
-			{patientVisits.map(patientVisit => <VisitView
+			{patientVisits.map(patientVisit => <Visit
 				key={patientVisit.id}
+				patient={patient}
 				patientVisit={patientVisit}
 				onSubmit={pv => updateVisit({ ...pv, id: patientVisit.id })}
-				onDelete={pv => removeVisit({ id: patientVisit.id, patientId: patientVisit.patientId })}
+				onDelete={_ => removeVisit({ id: patientVisit.id, patientId: patientVisit.patientId })}
 			/>)}
 
 			{nextCursor && <Row style={{ marginBottom: 20 }}>
@@ -312,10 +319,16 @@ function ProfileEditor({ patient, onSubmit }) {
 
 function Visit({ onSubmit, onDelete, patient, patientVisit }) {
 	const [isEditing, setIsEditing] = useState(false)
+
 	const submit = async (...args) => {
 		const success = await onSubmit(...args)
 		if (success) setIsEditing(false)
 	}
+
+	if (!patientVisit) {
+		return <VisitEditor onSubmit={submit} />
+	}
+
 	return isEditing ?
 		<VisitEditor onSubmit={submit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
 		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patient={patient} patientVisit={patientVisit} />
@@ -412,27 +425,33 @@ function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 	<li></li>
 </ol>
 `
-	const [editorState, setEditorState] = useState(
-		!!patientVisit ? EditorState.createWithContent(
-			ContentState.createFromBlockArray(
-				htmlToDraft(patientVisit.diagnosis).contentBlocks
-			)
-		) : EditorState.createEmpty()
-	);
-	const [isEditing, setIsEditing] = useState(!patientVisit)
-	const date = patientVisit ? moment(patientVisit['date']) : moment()
-	const dateStr = patientVisit ? date.format('LL') + ' (' + date.fromNow() + ')' : date.format('LL')
+
+	const initialText = patientVisit ? EditorState.createWithContent(
+		ContentState.createFromBlockArray(
+			htmlToDraft(patientVisit.diagnosis).contentBlocks
+		)
+	) : EditorState.createWithContent(
+		ContentState.createFromBlockArray(
+			htmlToDraft(defaultText).contentBlocks
+		)
+	)
+
+	const [editorState, setEditorState] = useState(initialText);
+
+	const date = !!patientVisit ? moment(patientVisit.date) : moment()
+	const dateStr = !!patientVisit ? date.format('LL') + ' (' + date.fromNow() + ')' : date.format('LL')
 
 	const submit = () => {
 		onSubmit({
 			'diagnosis': draftToHtml(convertToRaw(editorState.getCurrentContent())),
 		})
+		setEditorState(initialText)
 	}
 	return (
 		<Card style={{ marginBottom: 20 }}>
 			<Card.Header>{dateStr}</Card.Header>
 
-			{!!isEditing && <Card.Body style={{ padding: 0 }}>
+			<Card.Body style={{ padding: 0 }}>
 				<Editor
 					editorState={editorState}
 					onEditorStateChange={setEditorState}
@@ -440,22 +459,11 @@ function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 					toolbarStyle={{ border: 0, padding: 0 }}
 					editorStyle={{ padding: 10 }}
 				/>
-			</Card.Body>}
-
-			{!isEditing && <Card.Body>
-				<div dangerouslySetInnerHTML={{ __html: patientVisit.diagnosis }}></div>
-			</Card.Body>}
+			</Card.Body>
 
 			<Card.Footer style={{ textAlign: "right" }}>
-				{!!isEditing && <>
-					{patientVisit && <Button variant="secondary" onClick={() => setIsEditing(false)}>Cancel</Button>}
-					{' '}<Button variant="primary" onClick={submit}>Submit</Button>
-				</>}
-
-				{!isEditing && <>
-					<Button variant="link" onClick={() => setIsEditing(true)}><BsPencil /></Button>
-					<Button variant="link" onClick={onDelete}><BsTrash /></Button>
-				</>}
+				{!!patientVisit && <Button variant="secondary" onClick={onCancel}>Cancel</Button>}
+				{' '}<Button variant="primary" onClick={submit}>Submit</Button>
 			</Card.Footer>
 		</Card>
 	)
