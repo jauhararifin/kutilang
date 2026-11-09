@@ -5,20 +5,21 @@ import htmlToDraft from 'html-to-draftjs';
 import moment from 'moment';
 import 'moment/locale/id';
 import Noty from 'noty';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import Button from 'react-bootstrap/Button';
 import Card from 'react-bootstrap/Card';
 import Container from 'react-bootstrap/Container';
 import Form from 'react-bootstrap/Form';
+import FormControl from 'react-bootstrap/FormControl';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Row from 'react-bootstrap/Row';
 import Spinner from 'react-bootstrap/Spinner';
 import Table from 'react-bootstrap/Table';
 import { Editor } from "react-draft-wysiwyg";
 import "react-draft-wysiwyg/dist/react-draft-wysiwyg.css";
-import { FaPrint } from "react-icons/fa";
 import { BsPencil, BsTrash } from "react-icons/bs";
+import { FaPrint } from "react-icons/fa";
 import { useHistory, useParams } from 'react-router-dom';
 import * as Yup from 'yup';
 import { deletePatient, deleteVisit, getPatient, getPatientVisits, insertVisit, postPatient, putPatient, putVisit } from '../service';
@@ -114,10 +115,11 @@ function VisitPage() {
 		}
 	}
 
-	const newVisit = async ({ diagnosis }) => {
+	const newVisit = async ({ diagnosis, date }) => {
 		setIsLoading(true)
 		const resp = await insertVisit({
 			patientId: patient.id,
+			date: date,
 			diagnosis: diagnosis,
 		})
 		if (resp['errorMessage'])
@@ -129,23 +131,25 @@ function VisitPage() {
 		setIsLoading(false)
 	}
 
-	const updateVisit = async ({ id, diagnosis }) => {
+	const updateVisit = async ({ id, diagnosis, date }) => {
 		setIsLoading(true)
+		let success = false
 		const resp = await putVisit({
 			id: id,
 			patientId: patient.id,
+			date: date,
 			diagnosis: diagnosis,
 		})
-		let result = false
-		if (resp['errorMessage'])
+		if (resp['errorMessage']) {
 			showErrorPopup(resp['errorMessage'])
-		else {
-			result = true
+			success = false
+		} else {
 			showSuccessPopup('Visit updated')
-			setPatientVisits(patientVisits.map(pv => pv.id == id ? resp['result'] : pv))
+			setPatientVisits(patientVisits.map(pv => pv.id === id ? resp['result'] : pv))
+			success = true
 		}
 		setIsLoading(false)
-		return result
+		return success
 	}
 
 	const removeVisit = async ({ id, patientId }) => {
@@ -185,8 +189,7 @@ function VisitPage() {
 
 		{!isNewPatientPage && <>
 			<h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>New Entry</h5>
-			{/* <VisitView onSubmit={newVisit} /> */}
-			<Visit patient={patient} onSubmit={pv => newVisit(pv)} />
+			<VisitEditor onSubmit={newVisit} />
 
 			{patientVisits.length > 0 && <h5 style={{ textAlign: "center", marginBottom: 30, marginTop: 20 }}>History</h5>}
 			{patientVisits.map(patientVisit => <Visit
@@ -208,23 +211,23 @@ function Profile({ patient, onEdit, onDelete }) {
 	return <Table striped bordered hover>
 		<tbody>
 			<tr>
-				<th style={{ width: 200 }}>Name</th>
+				<th style={{ width: 200 }}>Nama</th>
 				<td>{patient.name}</td>
 			</tr>
 			<tr>
-				<th>Family Name</th>
+				<th>Nama KK</th>
 				<td>{patient.headFamilyName}</td>
 			</tr>
 			<tr>
-				<th>Birthdate</th>
+				<th>Tanggal Lahir</th>
 				<td>{moment(patient['birthDate']).format('LL')} ({moment().diff(patient['birthDate'], 'years')} years old)</td>
 			</tr>
 			<tr>
-				<th>Address</th>
+				<th>Alamat</th>
 				<td>{patient['address']}</td>
 			</tr>
 			<tr>
-				<th>Last Visit</th>
+				<th>Kunjungan Terakhir</th>
 				<td>{moment(patient['lastVisit']).format('LL')} ({moment(patient['lastVisit']).fromNow()})</td>
 			</tr>
 			<tr>
@@ -319,16 +322,10 @@ function ProfileEditor({ patient, onSubmit }) {
 
 function Visit({ onSubmit, onDelete, patient, patientVisit }) {
 	const [isEditing, setIsEditing] = useState(false)
-
 	const submit = async (...args) => {
 		const success = await onSubmit(...args)
 		if (success) setIsEditing(false)
 	}
-
-	if (!patientVisit) {
-		return <VisitEditor onSubmit={submit} />
-	}
-
 	return isEditing ?
 		<VisitEditor onSubmit={submit} onCancel={() => setIsEditing(false)} patientVisit={patientVisit} /> :
 		<VisitView onDelete={onDelete} onEdit={() => setIsEditing(true)} patient={patient} patientVisit={patientVisit} />
@@ -393,8 +390,8 @@ class VisitViewForPrint extends React.PureComponent {
 						</tbody>
 					</table>
 				</div>
-				<h5 style={{ textAlign: "center", paddingTop: 20 }}>{dateStr}</h5>
-				<div style={{ marginTop: 20, padding: 5, fontSize: 12 }} dangerouslySetInnerHTML={{ __html: this.props.patientVisit.diagnosis }}></div>
+				<h5 style={{textAlign: "center", paddingTop: 20}}>{dateStr}</h5>
+				<div style={{marginTop: 20, padding: 5, fontSize: 12}} dangerouslySetInnerHTML={{ __html: this.props.patientVisit.diagnosis }}></div>
 			</div>
 		);
 	}
@@ -425,33 +422,30 @@ function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 	<li></li>
 </ol>
 `
-
-	const initialText = patientVisit ? EditorState.createWithContent(
-		ContentState.createFromBlockArray(
-			htmlToDraft(patientVisit.diagnosis).contentBlocks
+	const [editorState, setEditorState] = useState(
+		!!patientVisit ? EditorState.createWithContent(
+			ContentState.createFromBlockArray(
+				htmlToDraft(patientVisit.diagnosis).contentBlocks
+			)
+		) : EditorState.createWithContent(
+			ContentState.createFromBlockArray(
+				htmlToDraft(defaultText).contentBlocks
+			)
 		)
-	) : EditorState.createWithContent(
-		ContentState.createFromBlockArray(
-			htmlToDraft(defaultText).contentBlocks
-		)
-	)
-
-	const [editorState, setEditorState] = useState(initialText);
-
-	const date = !!patientVisit ? moment(patientVisit.date) : moment()
-	const dateStr = !!patientVisit ? date.format('LL') + ' (' + date.fromNow() + ')' : date.format('LL')
+	);
+	const [date, setDate] = useState(patientVisit ? patientVisit['date'] : new Date().toISOString().slice(0, 10))
 
 	const submit = () => {
 		onSubmit({
+			'date': date,
 			'diagnosis': draftToHtml(convertToRaw(editorState.getCurrentContent())),
 		})
-		setEditorState(initialText)
 	}
+
 	return (
 		<Card style={{ marginBottom: 20 }}>
-			<Card.Header>{dateStr}</Card.Header>
-
-			<Card.Body style={{ padding: 0 }}>
+			<Card.Body style={{ padding: 10 }}>
+				<FormControl type="date" value={date} onChange={ev => setDate(ev.target.value)} style={{ marginBottom: 10 }} />
 				<Editor
 					editorState={editorState}
 					onEditorStateChange={setEditorState}
@@ -462,7 +456,7 @@ function VisitEditor({ onSubmit, onCancel, patientVisit }) {
 			</Card.Body>
 
 			<Card.Footer style={{ textAlign: "right" }}>
-				{!!patientVisit && <Button variant="secondary" onClick={onCancel}>Cancel</Button>}
+				{onCancel && <Button variant="secondary" onClick={onCancel}>Cancel</Button>}
 				{' '}<Button variant="primary" onClick={submit}>Submit</Button>
 			</Card.Footer>
 		</Card>

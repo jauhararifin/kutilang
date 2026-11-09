@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,11 +16,12 @@ import (
 type Storage interface {
 	InsertPatient(ctx context.Context, patient patient.Profile, keywords []string) error
 	GetPatient(ctx context.Context, patientID string) (patient.Profile, error)
+	GetAllPatients(ctx context.Context) (<-chan patient.Profile, error)
 	UpdatePatient(ctx context.Context, patient patient.Profile, keywords []string) error
 	SearchPatient(
 		ctx context.Context,
 		keywords []string,
-		lastVisit time.Time,
+		lastVisit string,
 		lastPatientID string,
 		batchSize int,
 	) ([]patient.Profile, error)
@@ -31,7 +31,7 @@ type Storage interface {
 	GetPatientVisits(
 		ctx context.Context,
 		patientID string,
-		dateCursor time.Time,
+		dateCursor string,
 		idCursor string,
 		batchSize int,
 	) ([]patient.Visit, error)
@@ -50,14 +50,13 @@ func (c *controller) InsertPatient(ctx context.Context, profile patient.Profile)
 	}
 
 	profile.ID = c.generateID()
-	profile.LastVisit = time.Now()
+	profile.LastVisit = time.Now().Local().Format("2006-01-02")
 
 	keywords := c.generateKeywords(profile)
 	if err := c.storage.InsertPatient(ctx, profile, keywords); err != nil {
 		return patient.Profile{}, fmt.Errorf("cannot insert patient: %w", err)
 	}
 
-	profile.LastVisit = profile.LastVisit.Local()
 	return profile, nil
 }
 
@@ -140,7 +139,7 @@ func (c *controller) SearchPatient(ctx context.Context, query string, option pat
 	result := patient.SearchResult{Results: patients}
 	if len(patients) >= option.BatchSize {
 		lastEntry := patients[len(patients)-1]
-		result.NextCursor = c.buildPatientCursor(strconv.FormatInt(lastEntry.LastVisit.Unix(), 10), lastEntry.ID)
+		result.NextCursor = c.buildPatientCursor(lastEntry.LastVisit, lastEntry.ID)
 	}
 
 	return result, nil
@@ -163,21 +162,18 @@ func (c *controller) getKeywordsFromQuery(query string) []string {
 	return keywords
 }
 
-func (c *controller) parsePatientCursor(cursor string) (lastVisit time.Time, lastaPatientID string, err error) {
+func (c *controller) parsePatientCursor(cursor string) (lastVisit string, lastaPatientID string, err error) {
+	infiniteDate := "9999-12-31"
 	if cursor == "" {
-		return time.Now(), "", nil
+		return infiniteDate, "", nil
 	}
 
 	parts := strings.Split(cursor, ".")
 	if len(parts) != 2 {
-		return time.Now(), "", fmt.Errorf("invalid format")
-	}
-	lastVisitTs, err := strconv.ParseInt(parts[0], 10, 32)
-	if err != nil {
-		return time.Now(), "", fmt.Errorf("invalid format: %w", err)
+		return infiniteDate, "", fmt.Errorf("invalid format")
 	}
 
-	return time.Unix(lastVisitTs, 0), parts[1], nil
+	return parts[0], parts[1], nil
 }
 
 func (c *controller) buildPatientCursor(lastVisit, lastPatientID string) string {
@@ -217,19 +213,27 @@ func (c *controller) InsertPatientVisit(ctx context.Context, patientVisit patien
 	}
 
 	patientVisit.ID = c.generateID()
-	patientVisit.Date = time.Now()
+	if patientVisit.Date == "" {
+		patientVisit.Date = time.Now().Local().Format("2006-01-02")
+	}
 
 	if err := c.storage.InsertPatientVisit(ctx, patientVisit); err != nil {
 		return patient.Visit{}, fmt.Errorf("cannot insert patient visit: %w", err)
 	}
 
-	patientVisit.Date = patientVisit.Date.Local()
 	return patientVisit, nil
 }
 
 func (c *controller) validatePatientVisit(patientVisit *patient.Visit) error {
 	if strings.TrimSpace(patientVisit.Diagnosis) == "" {
 		return fmt.Errorf("missing diagnosis")
+	}
+	if patientVisit.Date != "" {
+		date, err := parseDate(patientVisit.Date)
+		if err != nil {
+			return err
+		}
+		patientVisit.Date = date
 	}
 	return nil
 }
@@ -260,25 +264,22 @@ func (c *controller) GetPatientVisits(ctx context.Context, patientID string, opt
 	return result, nil
 }
 
-func (c *controller) parsePatientVisitCursor(cursor string) (lastVisit time.Time, id string, err error) {
+func (c *controller) parsePatientVisitCursor(cursor string) (lastVisit string, id string, err error) {
+	infiniteDate := "9999-12-31"
 	if cursor == "" {
-		return time.Now(), "", nil
+		return infiniteDate, "", nil
 	}
 
 	parts := strings.Split(cursor, ".")
 	if len(parts) != 2 {
-		return time.Now(), "", fmt.Errorf("invalid format")
-	}
-	timestamp, err := strconv.ParseInt(parts[0], 10, 32)
-	if err != nil {
-		return time.Now(), "", fmt.Errorf("invalid format: %w", err)
+		return infiniteDate, "", fmt.Errorf("invalid format")
 	}
 
-	return time.Unix(timestamp, 0), parts[1], nil
+	return parts[0], parts[1], nil
 }
 
-func (c *controller) buildPatientVisitCursor(timestamp time.Time, id string) string {
-	return strconv.FormatInt(timestamp.Unix(), 10) + "." + id
+func (c *controller) buildPatientVisitCursor(lastVisit string, id string) string {
+	return lastVisit + "." + id
 }
 
 func (c *controller) DeletePatientVisit(ctx context.Context, visitID string) error {
@@ -298,6 +299,10 @@ func (c *controller) UpdatePatientVisit(ctx context.Context, patientVisit patien
 
 	if patientVisit.ID == "" {
 		return patient.Visit{}, fmt.Errorf("missing patient id visit")
+	}
+
+	if patientVisit.Date == "" {
+		patientVisit.Date = time.Now().Local().Format("2006-01-02")
 	}
 
 	if err := c.storage.UpdatePatientVisit(ctx, patientVisit); err != nil {

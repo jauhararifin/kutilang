@@ -7,8 +7,9 @@ import (
 	"os"
 	"path"
 
+	"github.com/getlantern/systray"
 	"github.com/sirupsen/logrus"
-	"github.com/webview/webview"
+	"github.com/spf13/cobra"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/jauhararifin/kutilang/core"
@@ -17,10 +18,32 @@ import (
 	"github.com/jauhararifin/kutilang/sqlite"
 )
 
-const appName = "Kutilang"
-const port = 5000
+const appName = "kutilang"
+
+var (
+	dbFlag   string
+	addrFlag string
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "kutilang",
+	Short: "Kuting is a simple clinic management app",
+	Run:   runServer,
+}
+
+func init() {
+	rootCmd.Flags().StringVar(&dbFlag, "db", "", "path to the sqlite3 database file (default: <user config dir>/kutilang/db.sqlite3)")
+	rootCmd.Flags().StringVar(&addrFlag, "addr", ":5000", "address for the http server to listen on")
+}
 
 func main() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func runServer(cmd *cobra.Command, args []string) {
 	logWriter, err := prepareLogFile()
 	if err != nil {
 		fmt.Println("cannot use default log file")
@@ -32,9 +55,12 @@ func main() {
 	logrusLogger.SetOutput(logWriter)
 	logger := log.New(logrusLogger)
 
-	dbFile, err := prepareDBFile()
-	if err != nil {
-		panic(fmt.Errorf("cannot initialize db file: %w", err))
+	dbFile := dbFlag
+	if dbFile == "" {
+		dbFile, err = prepareDBFile()
+		if err != nil {
+			panic(fmt.Errorf("cannot initialize db file: %w", err))
+		}
 	}
 
 	storage, err := sqlite.NewDB(dbFile, logger)
@@ -43,21 +69,37 @@ func main() {
 	}
 
 	controller := core.NewController(storage, logger)
-	server := http.NewHandler(controller, logger)
+	backupController := core.NewBackupController(storage, logger)
+	server := http.NewHandler(controller, backupController, logger)
 
+	ctx := context.Background()
+	trayReady := make(chan struct{})
+
+	// The http server runs in the background. If it stops on its own (e.g. the
+	// port is already in use), the whole app quits, same as before.
 	go func() {
-		logger.Log(context.Background(), "starting http server", "port", port)
-		if err := server.Start(fmt.Sprintf("localhost:%d", port)); err != nil {
-			panic(fmt.Errorf("cannot start http: %w", err))
+		logger.Log(ctx, "starting http server", "addr", addrFlag, "db", dbFile)
+		if err := server.Start(addrFlag); err != nil {
+			logger.Log(ctx, "server stopped", "err", err)
 		}
+		<-trayReady
+		systray.Quit()
 	}()
 
-	w := webview.New(false)
-	defer w.Destroy()
-	w.SetTitle(appName)
-	w.SetSize(800, 600, webview.HintNone)
-	w.Navigate(fmt.Sprintf("http://localhost:%d/", port))
-	w.Run()
+	// The tray must run on the main thread (required by macOS, harmless on
+	// Windows). systray locks the main goroutine to the main thread in its
+	// init. It blocks until "Quit" is clicked.
+	systray.Run(func() {
+		quit := systray.AddMenuItem("Quit", "Quit the whole app")
+		systray.SetTitle("Klinik Kutilang")
+		close(trayReady)
+		go func() {
+			<-quit.ClickedCh
+			systray.Quit()
+		}()
+	}, func() {
+		server.Stop()
+	})
 }
 
 func prepareLogFile() (io.WriteCloser, error) {

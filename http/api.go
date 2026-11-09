@@ -12,8 +12,11 @@ import (
 )
 
 type handler struct {
-	service patient.Service
-	logger  log.Log
+	service       patient.Service
+	backupService patient.BackupService
+	logger        log.Log
+
+	httpServer *http.Server
 }
 
 func (h *handler) Start(addr string) error {
@@ -27,6 +30,7 @@ func (h *handler) Start(addr string) error {
 	router.Path("/api/v1/patients/{patientID}/visits/").HandlerFunc(h.handleGetPatientVisit).Methods("GET")
 	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleDeletePatientVisit).Methods("DELETE")
 	router.Path("/api/v1/patients/{patientID}/visits/{patientVisitID}/").HandlerFunc(h.handleUpdatePatientVisit).Methods("PUT")
+	router.Path("/api/v1/backup/patients/").HandlerFunc(h.handleBackupPatients).Methods("GET")
 	router.PathPrefix("/").Handler(staticFileHandler()).Methods("GET")
 
 	handler := (func(h http.Handler) http.Handler {
@@ -45,7 +49,15 @@ func (h *handler) Start(addr string) error {
 	})(router)
 	handler = log.NewMiddleware(h.logger)(handler)
 
-	return http.ListenAndServe(addr, handler)
+	h.httpServer = &http.Server{Addr: addr, Handler: handler}
+	return h.httpServer.ListenAndServe()
+}
+
+func (h *handler) Stop() error {
+	if h.httpServer != nil {
+		return h.httpServer.Close()
+	}
+	return fmt.Errorf("server not started")
 }
 
 func (h *handler) handleInsertPatient(w http.ResponseWriter, req *http.Request) {
@@ -209,6 +221,14 @@ func (h *handler) handleDeletePatientVisit(w http.ResponseWriter, req *http.Requ
 	h.writeResult(w, nil, nil)
 }
 
-func NewHandler(service patient.Service, logger log.Log) *handler {
-	return &handler{service: service, logger: logger}
+func (h *handler) handleBackupPatients(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/csv")
+	if err := h.backupService.BackupPatients(req.Context(), w); err != nil {
+		h.writeResult(w, nil, fmt.Errorf("cannot download patient data: %w", err))
+		return
+	}
+}
+
+func NewHandler(service patient.Service, backupService patient.BackupService, logger log.Log) *handler {
+	return &handler{service: service, backupService: backupService, logger: logger}
 }
