@@ -14,7 +14,7 @@ use std::time::Duration;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyWindowHandle, AsyncApp, Context, Entity, Modifiers, PlatformInput, ScrollDelta, ScrollEvent,
-    ScrollSource, TouchPhase, Window, WindowAppearance, point, px,
+    ScrollSource, TouchPhase, Window, point, px,
 };
 use kutilangv2::dates;
 use kutilangv2::model::{DiagnosisFormat, PatientOrder};
@@ -110,9 +110,6 @@ fn main() {
         cx.activate(true);
 
         cx.spawn(async move |cx| {
-            // Light first; the dark appearance is captured at the end.
-            settle(cx).await;
-            cx.update(|cx| ui::apply_theme(WindowAppearance::Light, cx));
             capture(window, &out, "01-patients", cx).await;
 
             update(window, &app, cx, |app, window, cx| {
@@ -234,11 +231,6 @@ fn main() {
                 use gpui_kit::component::WindowExt as _;
                 window.close_all_dialogs(cx);
             });
-
-            // The dark appearance.
-            cx.update(|cx| ui::apply_theme(WindowAppearance::Dark, cx));
-            scroll(window, (800., 500.), -5000., cx);
-            capture(window, &out, "11-dark", cx).await;
 
             cx.update(|cx| cx.quit());
         })

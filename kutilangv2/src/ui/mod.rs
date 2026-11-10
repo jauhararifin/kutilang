@@ -57,7 +57,7 @@ pub fn window_options(cx: &App) -> WindowOptions {
     }
 }
 
-/// Uses the light or dark theme to match the system.
+/// Applies the light or dark theme, with the application's text size.
 pub fn apply_theme(appearance: WindowAppearance, cx: &mut App) {
     Theme::change(appearance, None, cx);
     // Changing the theme reloads its sizes too.
@@ -67,7 +67,8 @@ pub fn apply_theme(appearance: WindowAppearance, cx: &mut App) {
 /// Initializes the components, the theme, the application menu and quitting.
 pub fn init(cx: &mut App) {
     gpui_kit::init(cx);
-    apply_theme(cx.window_appearance(), cx);
+    // Always light, whatever the system appearance.
+    apply_theme(WindowAppearance::Light, cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     // Cmd on macOS, Ctrl elsewhere.
     macro_rules! shortcuts {

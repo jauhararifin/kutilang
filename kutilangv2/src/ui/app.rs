@@ -63,10 +63,6 @@ impl KutilangApp {
             cx.subscribe_in(&visits, window, |this, _, event, window, cx| match event {
                 VisitsEvent::OpenPatient(id) => this.open_patient(id, window, cx),
             }),
-            // Follow the system's light or dark appearance.
-            cx.observe_window_appearance(window, |_, window, cx| {
-                super::apply_theme(window.appearance(), cx)
-            }),
         ];
 
         if let Some(report) = migration {

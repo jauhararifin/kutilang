@@ -69,8 +69,8 @@ understand the new schema. To go back, use the backup copy.
 ## Using it
 
 The window follows the platform's conventions: a title bar drawn by the app, a
-sidebar, list-and-detail panes with a draggable divider, dialogs for forms, the
-system's light or dark appearance, and menus with keyboard shortcuts (Cmd on
+sidebar, list-and-detail panes with a draggable divider, dialogs for forms, a
+light theme, and menus with keyboard shortcuts (Cmd on
 macOS, Ctrl on Windows and Linux).
 
 * **Patients** (Cmd/Ctrl-1): every patient, with the total count. Typing in the
