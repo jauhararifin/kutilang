@@ -76,6 +76,10 @@ fn main() {
     let out = PathBuf::from(args.next().expect("output directory"));
     let query = args.next().unwrap_or_else(|| "nur".into());
     std::fs::create_dir_all(&out).unwrap();
+    // The language choice and the recent databases go to the output folder,
+    // never to the real settings, even if the tour fails half-way.
+    // SAFETY: nothing else runs yet.
+    unsafe { std::env::set_var("KUTILANG_CONFIG_DIR", out.join("config")) };
 
     gpui_kit::application()
         .with_assets(ui::Assets)
@@ -365,11 +369,72 @@ fn main() {
                     window.close_all_dialogs(cx);
                 });
 
-                // Switching the language rebuilds the views in English, and back.
-                let preference = kutilangv2::app_dir().join("language.txt");
-                let saved_preference = std::fs::read(&preference).ok();
+                // A visit being written is not lost by choosing another patient.
+                let other = check
+                    .list_patients("", PatientOrder::RecentVisit)
+                    .unwrap()
+                    .into_iter()
+                    .find(|p| p.id != patient.id)
+                    .expect("another patient")
+                    .id;
+                let id = patient.id.clone();
+                update(window, &app, cx, move |app, window, cx| {
+                    app.open_patient(&id, window, cx);
+                    let detail = app.patients().read(cx).detail().unwrap().clone();
+                    detail.update(cx, |d, cx| d.open_composer(window, cx));
+                });
+                settle(cx).await;
+                window
+                    .update(cx, |_, window, cx| {
+                        window.dispatch_keystroke(gpui_kit::Keystroke::parse("x").unwrap(), cx)
+                    })
+                    .unwrap();
+                settle(cx).await;
+                let unsaved = window
+                    .update(cx, |_, _, cx| app.read(cx).has_unsaved_changes(cx))
+                    .unwrap();
+                assert!(unsaved, "typing in the composer is an unsaved change");
+                let other_id = other.clone();
+                update(window, &app, cx, move |app, window, cx| {
+                    app.open_patient(&other_id, window, cx)
+                });
+                settle(cx).await;
+                let (shown, asking) = window
+                    .update(cx, |_, window, cx| {
+                        use gpui_kit::component::WindowExt as _;
+                        let detail = app.read(cx).patients().read(cx).detail().unwrap().clone();
+                        let shown = detail.read(cx).patient_id().to_string();
+                        (shown, window.has_active_dialog(cx))
+                    })
+                    .unwrap();
+                assert_eq!(shown, patient.id, "the patient being written for stays");
+                assert!(asking, "the user is asked before the text is lost");
+                capture(window, &out, "14-discard-changes", cx).await;
+                // Answer "Cancel", then leave the draft.
+                update(window, &app, cx, |app, window, cx| {
+                    use gpui_kit::component::WindowExt as _;
+                    window.close_all_dialogs(cx);
+                    let detail = app.patients().read(cx).detail().unwrap().clone();
+                    let first = detail.read(cx).entry_ids(cx)[0].clone();
+                    detail.update(cx, |d, cx| d.select_visit(&first, window, cx));
+                });
+                settle(cx).await;
+                let unsaved = window
+                    .update(cx, |_, _, cx| app.read(cx).has_unsaved_changes(cx))
+                    .unwrap();
+                assert!(!unsaved);
+                println!("ok: choosing another patient asks before losing a visit being written");
+
+                // Switching the language redraws the views in English, and back.
+                drop(app);
                 for language in [Language::English, Language::Indonesian] {
-                    update(window, &app, cx, move |app, _, cx| {
+                    let current = window
+                        .update(cx, |_, _, cx| shell.read(cx).app().cloned())
+                        .unwrap()
+                        .expect("still open");
+                    update(window, &current, cx, move |app, window, cx| {
+                        // The language is chosen in the settings.
+                        app.show(Section::Settings, window, cx);
                         app.settings()
                             .update(cx, |s, cx| s.set_language(language, cx))
                     });
@@ -394,13 +459,55 @@ fn main() {
                     }
                 }
                 assert_eq!(kutilangv2::language(), Language::Indonesian);
-                match saved_preference {
-                    Some(bytes) => std::fs::write(&preference, bytes).unwrap(),
-                    None => std::fs::remove_file(&preference).unwrap(),
-                }
                 println!(
-                    "ok: switching the language rebuilds the views and keeps the settings open"
+                    "ok: switching the language redraws the views and keeps the settings open"
                 );
+
+                // Shortcuts work in a section without a text field to focus.
+                let app = window
+                    .update(cx, |_, _, cx| shell.read(cx).app().cloned())
+                    .unwrap()
+                    .expect("still open");
+                draw(window, cx);
+                window
+                    .update(cx, |_, window, cx| {
+                        window.dispatch_action(Box::new(ui::ShowVisits), cx)
+                    })
+                    .unwrap();
+                settle(cx).await;
+                let section = window
+                    .update(cx, |_, _, cx| app.read(cx).section())
+                    .unwrap();
+                assert_eq!(section, Section::Visits, "Cmd-2 works from the settings");
+                println!("ok: shortcuts work from the settings");
+
+                // Closing the database releases it (no view keeps it alive).
+                let store = window
+                    .update(cx, |_, _, cx| Rc::downgrade(app.read(cx).store()))
+                    .unwrap();
+                drop(app);
+                // Actions go through the last frame; a window on screen draws
+                // one after every change, this one only when asked.
+                draw(window, cx);
+                window
+                    .update(cx, |_, window, cx| {
+                        window.dispatch_action(Box::new(ui::CloseDatabase), cx)
+                    })
+                    .unwrap();
+                settle(cx).await;
+                draw(window, cx);
+                let (closed, can_open) = window
+                    .update(cx, |_, window, cx| {
+                        (
+                            shell.read(cx).app().is_none(),
+                            window.is_action_available(&ui::OpenDatabase, cx),
+                        )
+                    })
+                    .unwrap();
+                assert!(closed, "Close Database shows the picker");
+                assert!(can_open, "Cmd-O works on the picker");
+                assert!(store.upgrade().is_none(), "the closed database is released");
+                println!("ok: closing the database releases it, and Cmd-O works on the picker");
 
                 cx.update(|cx| cx.quit());
             })

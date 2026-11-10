@@ -61,6 +61,10 @@ fn parse_args() -> Result<Option<Args>, String> {
             _ => return Err(format!("unknown argument {arg:?}, see --help")),
         }
     }
+    // SQLite opens an empty path as a temporary database, deleted on exit.
+    if args.db.as_ref().is_some_and(|db| db.as_os_str().is_empty()) {
+        return Err("--db needs a path".into());
+    }
     Ok(Some(args))
 }
 

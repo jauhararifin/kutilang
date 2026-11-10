@@ -4,12 +4,13 @@
 //! New visits are written in Markdown. Visits of the original application
 //! stay in their HTML until their text is edited.
 
-use crate::{DiagnosisFormat, Patient, Visit, display_date};
+use crate::{DiagnosisFormat, Patient, Visit, display_date, language, t};
 use anyhow::Result;
 use html5ever::tendril::TendrilSink as _;
 use html5ever::{ParseOpts, parse_document};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 // ============================================================================
 // The visit template, and preparing a diagnosis for display.
@@ -218,7 +219,11 @@ fn decode_entities(text: &str) -> String {
                 "apos" | "#39" => Some('\''),
                 _ => entity
                     .strip_prefix('#')
-                    .and_then(|n| n.parse::<u32>().ok())
+                    .and_then(|n| match n.strip_prefix(['x', 'X']) {
+                        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                        None => n.parse::<u32>().ok(),
+                    })
+                    .filter(|&n| n != 0)
                     .and_then(char::from_u32),
             };
             c.map(|c| (c, end))
@@ -338,6 +343,14 @@ mod diagnosis_tests {
         );
         assert!(summary(TEMPLATE, DiagnosisFormat::Markdown, 20).ends_with('…'));
         assert_eq!(summary("", DiagnosisFormat::Html, 20), "");
+        assert_eq!(
+            summary(
+                "<p>a&#xA0;b &#65;&#x42; &#0;</p>",
+                DiagnosisFormat::Html,
+                20
+            ),
+            "a b AB &#0;"
+        );
     }
 
     #[test]
@@ -1119,7 +1132,7 @@ pub fn visit_page(patient: &Patient, visit: &Visit) -> String {
     let visit_date = display_date(&visit.date);
     format!(
         r#"<!doctype html>
-<html lang="id">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <title>{title}</title>
@@ -1136,10 +1149,10 @@ pub fn visit_page(patient: &Patient, visit: &Visit) -> String {
 <body onload="window.print()">
 <div class="profile">
 <table>
-<tr><th>Nama</th><td>{name}</td></tr>
-<tr><th>Tanggal Lahir</th><td>{birth_date}</td></tr>
-<tr><th>Alamat</th><td>{address}</td></tr>
-<tr><th>Kunjungan Terakhir</th><td>{last_visit}</td></tr>
+<tr><th>{name_label}</th><td>{name}</td></tr>
+<tr><th>{birth_date_label}</th><td>{birth_date}</td></tr>
+<tr><th>{address_label}</th><td>{address}</td></tr>
+<tr><th>{last_visit_label}</th><td>{last_visit}</td></tr>
 </table>
 </div>
 <h5 class="date">{visit_date}</h5>
@@ -1147,6 +1160,11 @@ pub fn visit_page(patient: &Patient, visit: &Visit) -> String {
 </body>
 </html>
 "#,
+        lang = language().code(),
+        name_label = t("Nama", "Name"),
+        birth_date_label = t("Tanggal Lahir", "Date of Birth"),
+        address_label = t("Alamat", "Address"),
+        last_visit_label = t("Kunjungan Terakhir", "Last Visit"),
         title = escape_html(&format!("{} - {}", patient.name, visit_date)),
         birth_date = escape_html(&display_date(&patient.birth_date)),
         address = escape_html(&patient.address).replace('\n', "<br>"),
@@ -1156,13 +1174,61 @@ pub fn visit_page(patient: &Patient, visit: &Visit) -> String {
     )
 }
 
-/// Writes the printable page into the temporary directory.
+/// How long a printable page is kept: long enough for the browser to load
+/// it, after which the copy of the record is removed.
+const PRINT_PAGE_LIFETIME: Duration = Duration::from_secs(10 * 60);
+
+/// The folder of the printable pages: the user's own cache folder, not the
+/// shared temporary one, since the pages hold medical records.
+fn print_dir() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("kutilang")
+        .join("print")
+}
+
+/// Writes the printable page of a visit, and removes the old ones.
 pub fn write_visit_page(patient: &Patient, visit: &Visit) -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join("kutilang-print");
+    let dir = print_dir();
     std::fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    remove_old_pages(&dir, PRINT_PAGE_LIFETIME);
     let path = dir.join(format!("visit-{}.html", visit.id));
     std::fs::write(&path, visit_page(patient, visit))?;
     Ok(path)
+}
+
+/// Removes the printable pages left from earlier, including those of
+/// earlier versions, which wrote them to the temporary folder.
+pub fn remove_old_print_pages() {
+    remove_old_pages(&print_dir(), PRINT_PAGE_LIFETIME);
+    remove_old_pages(&std::env::temp_dir().join("kutilang-print"), Duration::ZERO);
+}
+
+/// Removes the `visit-*.html` files of `dir` older than `age`.
+fn remove_old_pages(dir: &Path, age: Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with("visit-") && name.ends_with(".html")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|modified| now.duration_since(modified).unwrap_or_default() >= age);
+        if old {
+            std::fs::remove_file(entry.path()).ok();
+        }
+    }
 }
 
 /// A `file://` URL for a local path, percent-encoded.
@@ -1226,6 +1292,20 @@ mod print_tests {
             format: DiagnosisFormat::Html,
         };
         assert!(visit_page(&patient(), &visit).contains("<p><strong>KU</strong>: baik</p>"));
+    }
+
+    #[test]
+    fn old_pages_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let page = dir.path().join("visit-v.html");
+        let other = dir.path().join("notes.html");
+        std::fs::write(&page, "x").unwrap();
+        std::fs::write(&other, "x").unwrap();
+        remove_old_pages(dir.path(), Duration::from_secs(600));
+        assert!(page.exists(), "a recent page is kept for the browser");
+        remove_old_pages(dir.path(), Duration::ZERO);
+        assert!(!page.exists());
+        assert!(other.exists(), "only printable pages are removed");
     }
 
     #[test]

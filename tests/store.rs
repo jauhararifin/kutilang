@@ -720,6 +720,64 @@ fn refuses_to_restore_other_files() {
 }
 
 #[test]
+fn last_visit_follows_edited_and_deleted_visits() {
+    let store = Store::open_in_memory().unwrap();
+    let siti = store
+        .create_patient(&profile("Siti", ""), date(2026, 1, 1))
+        .unwrap();
+    let last_visit = |store: &Store| store.get_patient(&siti.id).unwrap().unwrap().last_visit;
+    // Dates after the registration date, whatever day the tests run.
+    let first = store
+        .add_visit(&siti.id, date(2090, 3, 1), "kontrol")
+        .unwrap();
+    let typo = store
+        .add_visit(&siti.id, date(2099, 3, 2), "tahun salah ketik")
+        .unwrap();
+    assert_eq!(last_visit(&store), "2099-03-02");
+
+    // Correcting the date brings the last visit back.
+    store
+        .update_visit(&typo.id, date(2091, 3, 2), None)
+        .unwrap();
+    assert_eq!(last_visit(&store), "2091-03-02");
+
+    // Deleting the newest visit falls back to the one before.
+    store.delete_visit(&typo.id).unwrap();
+    assert_eq!(last_visit(&store), "2090-03-01");
+
+    // With no visit left, the registration date.
+    store.delete_visit(&first.id).unwrap();
+    let registered = last_visit(&store);
+    assert!(registered.as_str() < "2090", "{registered}");
+    assert_eq!(registered, kutilangv2::to_stored(kutilangv2::today()));
+}
+
+#[test]
+fn never_overwrites_the_open_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db.sqlite3");
+    let (store, _) = Store::open(&path).unwrap();
+    store
+        .create_patient(&profile("Siti", ""), date(2026, 1, 1))
+        .unwrap();
+
+    // The same file, also under another name.
+    let same = dir.path().join(".").join("db.sqlite3");
+    assert!(store.backup_to(&same).is_err());
+    assert!(kutilangv2::store::export_xlsx(&store, &same).is_err());
+
+    assert!(
+        std::fs::read(&path)
+            .unwrap()
+            .starts_with(b"SQLite format 3")
+    );
+    assert_eq!(store.count_patients().unwrap(), 1);
+    drop(store);
+    let (reopened, _) = Store::open(&path).unwrap();
+    assert_eq!(reopened.count_patients().unwrap(), 1);
+}
+
+#[test]
 fn exports_patients_and_visits_to_excel() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open_in_memory().unwrap();

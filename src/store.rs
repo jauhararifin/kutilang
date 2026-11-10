@@ -457,7 +457,7 @@ impl Store {
                 params![id, date, now()],
             )?,
         };
-        raise_last_visit(&tx, &visit.patient_id, &date)?;
+        refresh_last_visit(&tx, &visit.patient_id)?;
         tx.commit()?;
         self.get_visit(id)?.ok_or_else(|| {
             anyhow::anyhow!(crate::t("Kunjungan tidak ditemukan", "Visit not found"))
@@ -466,12 +466,43 @@ impl Store {
 
     /// Hides a visit; the row stays in the database.
     pub fn delete_visit(&self, id: &str) -> Result<()> {
-        let changed = self.conn.execute(
+        let Some(visit) = self.get_visit(id)? else {
+            bail!(crate::t("Kunjungan tidak ditemukan", "Visit not found"));
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "UPDATE visits SET is_deleted = 1, updated_at = ?2 WHERE id = ?1 AND is_deleted = 0",
             params![id, now()],
         )?;
-        if changed == 0 {
-            bail!(crate::t("Kunjungan tidak ditemukan", "Visit not found"));
+        refresh_last_visit(&tx, &visit.patient_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Whether `path` is the file of this database, which must never be
+    /// overwritten by a backup or an export while it is open.
+    fn is_own_file(&self, path: &Path) -> bool {
+        let Some(own) = self.conn.path().filter(|p| !p.is_empty()) else {
+            return false;
+        };
+        match (Path::new(own).canonicalize(), path.canonicalize()) {
+            (Ok(own), Ok(path)) => own == path,
+            _ => false,
+        }
+    }
+
+    fn refuse_own_file(&self, path: &Path) -> Result<()> {
+        if self.is_own_file(path) {
+            bail!(crate::pick(
+                format!(
+                    "{} adalah database yang sedang dibuka; pilih berkas lain.",
+                    path.display()
+                ),
+                format!(
+                    "{} is the database that is open; choose another file.",
+                    path.display()
+                ),
+            ));
         }
         Ok(())
     }
@@ -516,6 +547,25 @@ fn insert_keywords(
     for keyword in patient_keywords(name, head_family_name) {
         stmt.execute(params![keyword, patient_id])?;
     }
+    Ok(())
+}
+
+/// Sets the patient's last visit after a visit's date changed or a visit was
+/// deleted: the most recent visit, or the registration date when it is later.
+/// A patient of the original application has no registration date; with no
+/// visit left, their last visit is kept.
+fn refresh_last_visit(conn: &Connection, patient_id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE patients SET last_visit = COALESCE(
+             NULLIF(max(
+                 COALESCE((SELECT max(v.date) FROM visits v
+                           WHERE v.patient_id = patients.id AND v.is_deleted = 0), ''),
+                 COALESCE(substr(created_at, 1, 10), '')
+             ), ''),
+             last_visit)
+         WHERE id = ?1",
+        [patient_id],
+    )?;
     Ok(())
 }
 
@@ -938,7 +988,7 @@ fn migrate_legacy(
         backup_path,
         patients,
         visits,
-        orphan_visits: total_visits - visits,
+        orphan_visits: total_visits.saturating_sub(visits),
         corrected_last_visits,
     })
 }
@@ -1000,6 +1050,7 @@ impl Store {
     /// Writes a complete, consistent copy of the database to `path`,
     /// replacing the file if it exists.
     pub fn backup_to(&self, path: &Path) -> Result<()> {
+        self.refuse_own_file(path)?;
         let dir = path
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
@@ -1195,16 +1246,16 @@ fn write_date(
     });
     match date {
         Some(date) => sheet.write_datetime_with_format(row, col, &date, &formats.date)?,
-        None => sheet.write_string(row, col, value)?,
+        None => sheet.write_string(row, col, limit(value))?,
     };
     Ok(())
 }
 
-fn limit(text: String) -> String {
-    if text.chars().count() <= CELL_LIMIT {
-        text
-    } else {
-        text.chars().take(CELL_LIMIT).collect()
+/// `text`, cut to what an Excel cell can hold (longer text is an error).
+fn limit(text: &str) -> &str {
+    match text.char_indices().nth(CELL_LIMIT) {
+        Some((end, _)) => &text[..end],
+        None => text,
     }
 }
 
@@ -1219,6 +1270,7 @@ fn header(sheet: &mut Worksheet, columns: &[(&str, f64)], formats: &Formats) -> 
 
 /// Writes a workbook with a sheet of patients and a sheet of visits.
 pub fn export_xlsx(store: &Store, path: &Path) -> Result<ExportReport> {
+    store.refuse_own_file(path)?;
     let today = today();
     let formats = Formats {
         header: Format::new().set_bold().set_background_color(0xE7E6E6),
@@ -1245,16 +1297,16 @@ pub fn export_xlsx(store: &Store, path: &Path) -> Result<ExportReport> {
     header(sheet, &columns, &formats)?;
     for (i, patient) in patients.iter().enumerate() {
         let row = i as u32 + 1;
-        sheet.write_string(row, 0, &patient.name)?;
-        sheet.write_string(row, 1, &patient.head_family_name)?;
+        sheet.write_string(row, 0, limit(&patient.name))?;
+        sheet.write_string(row, 1, limit(&patient.head_family_name))?;
         write_date(sheet, row, 2, &patient.birth_date, &formats)?;
         if let Some(birth) = parse_stored(&patient.birth_date) {
             sheet.write_number(row, 3, age_years(birth, today))?;
         }
-        sheet.write_string(row, 4, &patient.address)?;
+        sheet.write_string(row, 4, limit(&patient.address))?;
         write_date(sheet, row, 5, &patient.last_visit, &formats)?;
         sheet.write_number(row, 6, patient.visits as f64)?;
-        sheet.write_string(row, 7, &patient.id)?;
+        sheet.write_string(row, 7, limit(&patient.id))?;
     }
     sheet.autofilter(0, 0, patients.len() as u32, columns.len() as u16 - 1)?;
 
@@ -1273,12 +1325,12 @@ pub fn export_xlsx(store: &Store, path: &Path) -> Result<ExportReport> {
     for (i, visit) in visits.iter().enumerate() {
         let row = i as u32 + 1;
         write_date(sheet, row, 0, &visit.date, &formats)?;
-        sheet.write_string_with_format(row, 1, &visit.patient_name, &formats.wrap)?;
-        sheet.write_string_with_format(row, 2, &visit.head_family_name, &formats.wrap)?;
-        let text = limit(diagnosis::plain_text(&visit.diagnosis, visit.format));
-        sheet.write_string_with_format(row, 3, text, &formats.wrap)?;
-        sheet.write_string_with_format(row, 4, &visit.patient_id, &formats.wrap)?;
-        sheet.write_string_with_format(row, 5, &visit.id, &formats.wrap)?;
+        sheet.write_string_with_format(row, 1, limit(&visit.patient_name), &formats.wrap)?;
+        sheet.write_string_with_format(row, 2, limit(&visit.head_family_name), &formats.wrap)?;
+        let text = diagnosis::plain_text(&visit.diagnosis, visit.format);
+        sheet.write_string_with_format(row, 3, limit(&text), &formats.wrap)?;
+        sheet.write_string_with_format(row, 4, limit(&visit.patient_id), &formats.wrap)?;
+        sheet.write_string_with_format(row, 5, limit(&visit.id), &formats.wrap)?;
     }
     sheet.autofilter(0, 0, visits.len() as u32, columns.len() as u16 - 1)?;
 

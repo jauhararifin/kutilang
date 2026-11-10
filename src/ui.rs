@@ -35,9 +35,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, AssetSource, Bounds, Context, Div, Entity, EventEmitter, FontWeight,
-    KeyBinding, Menu, MenuItem, PathPromptOptions, Result, SharedString, Subscription, Task,
-    TitlebarOptions, Window, WindowAppearance, WindowBounds, WindowOptions, div, px, size,
+    AnyElement, App, AssetSource, Bounds, Context, Div, Entity, EventEmitter, FocusHandle,
+    FontWeight, KeyBinding, Menu, MenuItem, PathPromptOptions, Result, SharedString, Subscription,
+    Task, TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowOptions, div,
+    px, size,
 };
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -127,6 +128,7 @@ pub fn init(cx: &mut App) {
 /// Runs the application until its window is closed: opens `database`, or
 /// shows the database picker.
 pub fn run(database: Option<PathBuf>) {
+    diagnosis::remove_old_print_pages();
     gpui_kit::application().with_assets(Assets).run(move |cx| {
         init(cx);
         let options = window_options(cx);
@@ -176,15 +178,16 @@ enum Content {
         view: Entity<Launcher>,
         _subscription: Subscription,
     },
-    App {
-        view: Entity<KutilangApp>,
-        _subscription: Subscription,
-    },
+    App(Entity<KutilangApp>),
 }
 
 pub struct Shell {
     recent: Rc<RefCell<RecentDatabases>>,
     content: Content,
+    /// Focused when no field is, so that the shortcuts and menus keep
+    /// working: actions only reach the views around the focused element.
+    focus: FocusHandle,
+    _focus_lost: Subscription,
 }
 
 impl Shell {
@@ -197,14 +200,31 @@ impl Shell {
     ) -> Self {
         let recent = Rc::new(RefCell::new(recent));
         let content = Self::launcher(&recent, window, cx);
-        let shell = Self { recent, content };
-        if let Some(path) = database {
-            // Notifications need the window to be set up.
-            cx.defer_in(window, move |shell, window, cx| {
-                shell.open(&path, window, cx)
-            });
+        // A closed editor or a deleted patient takes the focus with it.
+        let focus_lost =
+            cx.on_focus_lost(window, |shell, window, cx| shell.restore_focus(window, cx));
+        // Closing the window asks first when there are unsaved changes.
+        let this = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            let unsaved = this
+                .read_with(cx, |shell, cx| shell.has_unsaved_changes(cx))
+                .unwrap_or(false);
+            if unsaved {
+                confirm_discard(window, cx, |window, _| window.remove_window());
+            }
+            !unsaved
+        });
+        // Notifications need the window to be set up.
+        cx.defer_in(window, move |shell, window, cx| match database {
+            Some(path) => shell.open(&path, window, cx),
+            None => shell.restore_focus(window, cx),
+        });
+        Self {
+            recent,
+            content,
+            focus: cx.focus_handle(),
+            _focus_lost: focus_lost,
         }
-        shell
     }
 
     fn launcher(
@@ -227,8 +247,8 @@ impl Shell {
         }
     }
 
-    /// Opens a database (creating it if needed). On failure the picker stays,
-    /// with the reason.
+    /// Opens a database (creating it if needed), replacing the one that is
+    /// open. On failure nothing changes, and the reason is shown.
     pub fn open(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
         match Store::open(path) {
             Ok((store, report)) => {
@@ -238,7 +258,7 @@ impl Shell {
                 self.recent.borrow_mut().add(path).ok();
                 let path = path.to_path_buf();
                 let app = cx.new(|cx| KutilangApp::new(Rc::new(store), report, path, window, cx));
-                self.show_app(app, window, cx);
+                self.content = Content::App(app);
             }
             Err(error) => {
                 window.push_notification(
@@ -253,49 +273,48 @@ impl Shell {
                     .autohide(false),
                     cx,
                 );
-                if matches!(self.content, Content::App { .. }) {
-                    self.content = Self::launcher(&self.recent, window, cx);
-                }
             }
         }
         cx.notify();
     }
 
-    fn show_app(&mut self, app: Entity<KutilangApp>, window: &mut Window, cx: &mut Context<Self>) {
-        let subscription =
-            cx.subscribe_in(&app, window, |shell, app, event, window, cx| match event {
-                AppEvent::LanguageChanged => {
-                    // Build the views again so every text is in the new language.
-                    let (store, path) = {
-                        let app = app.read(cx);
-                        (app.store().clone(), app.db_path().clone())
-                    };
-                    let fresh = cx.new(|cx| {
-                        let mut fresh = KutilangApp::new(store, None, path, window, cx);
-                        fresh.show(Section::Settings, window, cx);
-                        fresh
-                    });
-                    shell.show_app(fresh, window, cx);
-                }
-            });
-        self.content = Content::App {
-            view: app,
-            _subscription: subscription,
-        };
-        cx.notify();
+    /// Asks for a database file and opens it.
+    pub fn choose_database(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(t("Buka", "Open").into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = chosen.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            this.update_in(cx, |shell, window, cx| {
+                shell.after_confirming(window, cx, move |shell, window, cx| {
+                    shell.open(&path, window, cx)
+                })
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Closes the open database and shows the picker.
     pub fn show_launcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Content::App { .. } = self.content {
+        if let Content::App(_) = self.content {
             self.content = Self::launcher(&self.recent, window, cx);
+            self.focus.focus(window, cx);
             cx.notify();
         }
     }
 
     pub fn app(&self) -> Option<&Entity<KutilangApp>> {
         match &self.content {
-            Content::App { view, .. } => Some(view),
+            Content::App(app) => Some(app),
             Content::Launcher { .. } => None,
         }
     }
@@ -303,30 +322,154 @@ impl Shell {
     pub fn launcher_view(&self) -> Option<&Entity<Launcher>> {
         match &self.content {
             Content::Launcher { view, .. } => Some(view),
-            Content::App { .. } => None,
+            Content::App(_) => None,
+        }
+    }
+
+    /// Whether text was written that is not saved yet.
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.app()
+            .is_some_and(|app| app.read(cx).has_unsaved_changes(cx))
+    }
+
+    /// Runs `action` now, or after the user agreed to lose unsaved changes.
+    fn after_confirming(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        if self.has_unsaved_changes(cx) {
+            confirm_then(cx.weak_entity(), window, cx, action);
+        } else {
+            action(self, window, cx);
+        }
+    }
+
+    fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.content {
+            Content::App(app) => app.read(cx).focus_handle.clone().focus(window, cx),
+            Content::Launcher { .. } => self.focus.focus(window, cx),
+        }
+    }
+
+    fn update_app(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut KutilangApp, &mut Window, &mut Context<KutilangApp>),
+    ) {
+        if let Some(app) = self.app().cloned() {
+            app.update(cx, |app, cx| f(app, window, cx));
         }
     }
 }
 
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = match &self.content {
-            Content::Launcher { view, .. } => view.clone().into_any_element(),
-            Content::App { view, .. } => view.clone().into_any_element(),
+        let (content, has_app) = match &self.content {
+            Content::Launcher { view, .. } => (view.clone().into_any_element(), false),
+            Content::App(app) => (app.clone().into_any_element(), true),
         };
+        // The actions are handled here, around everything, so that they work
+        // whatever is focused; those of an open database only while it is.
         div()
             .size_full()
-            .on_action(cx.listener(|shell, _: &OpenDatabase, window, cx| {
-                shell.show_launcher(window, cx);
-                if let Content::Launcher { view, .. } = &shell.content {
-                    view.update(cx, |launcher, cx| launcher.choose_file(window, cx));
-                }
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|shell, _: &Quit, window, cx| {
+                shell.after_confirming(window, cx, |_, _, cx| cx.quit())
             }))
             .on_action(
-                cx.listener(|shell, _: &CloseDatabase, window, cx| shell.show_launcher(window, cx)),
+                cx.listener(|shell, _: &OpenDatabase, window, cx| {
+                    shell.choose_database(window, cx)
+                }),
             )
+            .when(has_app, |this| {
+                this.on_action(cx.listener(|shell, _: &CloseDatabase, window, cx| {
+                    shell.after_confirming(window, cx, |shell, window, cx| {
+                        shell.show_launcher(window, cx)
+                    })
+                }))
+                .on_action(cx.listener(|shell, _: &ShowPatients, window, cx| {
+                    shell.update_app(window, cx, |app, window, cx| {
+                        app.show(Section::Patients, window, cx)
+                    })
+                }))
+                .on_action(cx.listener(|shell, _: &ShowVisits, window, cx| {
+                    shell.update_app(window, cx, |app, window, cx| {
+                        app.show(Section::Visits, window, cx)
+                    })
+                }))
+                .on_action(cx.listener(|shell, _: &ShowSettings, window, cx| {
+                    shell.update_app(window, cx, |app, window, cx| {
+                        app.show(Section::Settings, window, cx)
+                    })
+                }))
+                .on_action(cx.listener(|shell, _: &NewPatient, window, cx| {
+                    shell.update_app(window, cx, |app, window, cx| app.new_patient(window, cx))
+                }))
+                .on_action(cx.listener(|shell, _: &BackUp, window, cx| {
+                    shell.update_app(window, cx, |app, window, cx| {
+                        app.settings
+                            .update(cx, |settings, cx| settings.back_up(window, cx))
+                    })
+                }))
+                .on_action(cx.listener(|shell, _: &RestoreBackup, window, cx| {
+                    shell.update_app(window, cx, |app, window, cx| {
+                        app.settings
+                            .update(cx, |settings, cx| settings.restore(window, cx))
+                    })
+                }))
+                .on_action(cx.listener(
+                    |shell, _: &ExportToExcel, window, cx| {
+                        shell.update_app(window, cx, |app, window, cx| {
+                            app.settings
+                                .update(cx, |settings, cx| settings.export(window, cx))
+                        })
+                    },
+                ))
+            })
             .child(content)
     }
+}
+
+/// Asks before losing changes that were not saved; runs `discard` when the
+/// user agrees.
+fn confirm_discard(
+    window: &mut Window,
+    cx: &mut App,
+    discard: impl Fn(&mut Window, &mut App) + 'static,
+) {
+    let discard = Rc::new(discard);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let discard = discard.clone();
+        alert
+            .title(t("Buang perubahan?", "Discard changes?"))
+            .description(t(
+                "Ada tulisan yang belum disimpan. Tulisan itu akan hilang.",
+                "Some text was not saved. It will be lost.",
+            ))
+            .show_cancel(true)
+            .cancel_text(t("Batal", "Cancel"))
+            .ok_text(t("Buang", "Discard"))
+            .ok_variant(ButtonVariant::Danger)
+            .on_ok(move |_, window, cx| {
+                discard(window, cx);
+                true
+            })
+    });
+}
+
+/// [`confirm_discard`], then `action` on the view.
+fn confirm_then<T: 'static>(
+    this: WeakEntity<T>,
+    window: &mut Window,
+    cx: &mut App,
+    action: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+) {
+    confirm_discard(window, cx, move |window, cx| {
+        this.update(cx, |this, cx| action(this, window, cx)).ok();
+    });
 }
 
 // ============================================================================
@@ -659,15 +802,10 @@ pub enum Section {
     Settings,
 }
 
-pub enum AppEvent {
-    /// Texts built when the views were made are in the old language.
-    LanguageChanged,
-}
-
-impl gpui_kit::EventEmitter<AppEvent> for KutilangApp {}
-
 pub struct KutilangApp {
     store: Rc<Store>,
+    /// Focused when the section has no field to focus.
+    focus_handle: FocusHandle,
     db_path: PathBuf,
     section: Section,
     patients: Entity<PatientsView>,
@@ -720,7 +858,6 @@ impl KutilangApp {
             window,
             |this, _, event, window, cx| match event {
                 SettingsEvent::DataReplaced => this.reload_records(window, cx),
-                SettingsEvent::LanguageChanged => cx.emit(AppEvent::LanguageChanged),
             },
         )];
 
@@ -733,6 +870,7 @@ impl KutilangApp {
 
         let mut app = Self {
             store,
+            focus_handle: cx.focus_handle(),
             db_path,
             section: Section::Patients,
             patients,
@@ -777,6 +915,19 @@ impl KutilangApp {
         &self.settings
     }
 
+    /// Whether text was written that is not saved yet: a visit, or the
+    /// template.
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.patients.read(cx).has_unsaved_changes(cx)
+            || self.settings.read(cx).has_unsaved_changes(cx)
+    }
+
+    pub fn new_patient(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show(Section::Patients, window, cx);
+        self.patients
+            .update(cx, |patients, cx| patients.new_patient(window, cx));
+    }
+
     /// Builds the Patients and Visits views again, after every record was
     /// replaced.
     fn reload_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -807,7 +958,7 @@ impl KutilangApp {
                     visits.focus_search(window, cx);
                 });
             }
-            Section::Settings => {}
+            Section::Settings => self.focus_handle.focus(window, cx),
         }
         cx.notify();
     }
@@ -929,32 +1080,7 @@ impl Render for KutilangApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .on_action(cx.listener(|this, _: &ShowPatients, window, cx| {
-                this.show(Section::Patients, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ShowVisits, window, cx| {
-                this.show(Section::Visits, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
-                this.show(Section::Settings, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &BackUp, window, cx| {
-                this.settings
-                    .update(cx, |settings, cx| settings.back_up(window, cx))
-            }))
-            .on_action(cx.listener(|this, _: &RestoreBackup, window, cx| {
-                this.settings
-                    .update(cx, |settings, cx| settings.restore(window, cx))
-            }))
-            .on_action(cx.listener(|this, _: &ExportToExcel, window, cx| {
-                this.settings
-                    .update(cx, |settings, cx| settings.export(window, cx))
-            }))
-            .on_action(cx.listener(|this, _: &NewPatient, window, cx| {
-                this.show(Section::Patients, window, cx);
-                this.patients
-                    .update(cx, |patients, cx| patients.new_patient(window, cx));
-            }))
+            .track_focus(&self.focus_handle)
             .child(TitleBar::new().child(self.render_title(cx)))
             .child(
                 h_flex()
@@ -1142,7 +1268,7 @@ impl PatientsView {
                         .get(ix.row)
                         .map(|p| p.id.clone());
                     if let Some(id) = id {
-                        this.show_patient(id, window, cx);
+                        this.request_patient(id, window, cx);
                     }
                 }
                 ListEvent::Cancel => {}
@@ -1175,6 +1301,40 @@ impl PatientsView {
             .update(cx, |list, cx| list.set_query(query, window, cx));
     }
 
+    /// Whether a visit being written for the shown patient is not saved.
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.detail
+            .as_ref()
+            .is_some_and(|detail| detail.read(cx).has_unsaved_changes(cx))
+    }
+
+    fn shown_patient(&self, cx: &App) -> Option<String> {
+        self.detail
+            .as_ref()
+            .map(|detail| detail.read(cx).patient_id().to_string())
+    }
+
+    /// Shows the patient chosen in the list, asking first when that would
+    /// lose a visit being written.
+    fn request_patient(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.shown_patient(cx);
+        if shown.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        if self.has_unsaved_changes(cx) {
+            // Keep the highlight on the patient shown until the user decides.
+            if let Some(shown) = shown {
+                self.reselect(&shown, window, cx);
+            }
+            confirm_then(cx.weak_entity(), window, cx, move |this, window, cx| {
+                this.reselect(&id, window, cx);
+                this.show_patient(id.clone(), window, cx);
+            });
+            return;
+        }
+        self.show_patient(id, window, cx);
+    }
+
     fn show_patient(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self
             .detail
@@ -1204,8 +1364,20 @@ impl PatientsView {
     }
 
     /// Selects a patient in the list (clearing the search if it hides the
-    /// patient) and shows it.
+    /// patient) and shows it, asking first when that would lose a visit
+    /// being written.
     pub fn select_patient(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_unsaved_changes(cx) && self.shown_patient(cx).as_deref() != Some(id) {
+            let id = id.to_string();
+            confirm_then(cx.weak_entity(), window, cx, move |this, window, cx| {
+                this.select_patient_now(&id, window, cx)
+            });
+            return;
+        }
+        self.select_patient_now(id, window, cx);
+    }
+
+    fn select_patient_now(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.list.read(cx).delegate().position(id).is_none() {
             self.list
                 .update(cx, |list, cx| list.set_query("", window, cx));
@@ -1639,7 +1811,7 @@ impl PatientDetail {
                             .get(ix.row)
                             .map(|r| r.visit.id.clone());
                         if let Some(id) = id {
-                            this.select_visit(&id, window, cx);
+                            this.request_visit(&id, window, cx);
                         }
                     }
                     ListEvent::Cancel => {}
@@ -1731,6 +1903,37 @@ impl PatientDetail {
         self.reload_patient(window, cx);
     }
 
+    /// Whether a visit being written or edited is not saved.
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.composer
+            .as_ref()
+            .is_some_and(|(composer, _)| composer.read(cx).has_changes(cx))
+            || self
+                .editor
+                .as_ref()
+                .is_some_and(|(_, editor, _)| editor.read(cx).has_changes(cx))
+    }
+
+    /// Shows the visit chosen in the list, asking first when that would lose
+    /// a visit being written.
+    fn request_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let editing_it = self.composer.is_none() && self.entry_editor(id).is_some();
+        if editing_it || !self.has_unsaved_changes(cx) {
+            self.select_visit(id, window, cx);
+            return;
+        }
+        // Keep the highlight on the visit shown until the user decides.
+        let shown = self.selected.clone();
+        self.visits.update(cx, |list, cx| {
+            let row = shown.and_then(|id| list.delegate().position(&id));
+            list.set_selected_index(row.map(IndexPath::new), window, cx);
+        });
+        let id = id.to_string();
+        confirm_then(cx.weak_entity(), window, cx, move |this, window, cx| {
+            this.select_visit(&id, window, cx)
+        });
+    }
+
     /// Shows a visit on the right, closing the editors.
     pub fn select_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.composer = None;
@@ -1753,6 +1956,13 @@ impl PatientDetail {
 
     pub fn open_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.composer.is_some() {
+            return;
+        }
+        if self.has_unsaved_changes(cx) {
+            confirm_then(cx.weak_entity(), window, cx, |this, window, cx| {
+                this.editor = None;
+                this.open_composer(window, cx);
+            });
             return;
         }
         self.editor = None;
@@ -1806,6 +2016,18 @@ impl PatientDetail {
     // Existing entries ------------------------------------------------------
 
     pub fn edit_entry(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.composer.is_none() && self.entry_editor(id).is_some() {
+            return;
+        }
+        if self.has_unsaved_changes(cx) {
+            let id = id.to_string();
+            confirm_then(cx.weak_entity(), window, cx, move |this, window, cx| {
+                this.composer = None;
+                this.editor = None;
+                this.edit_entry(&id, window, cx);
+            });
+            return;
+        }
         let Some(visit) = self.visits.read(cx).delegate().visit(id).cloned() else {
             return;
         };
@@ -1871,7 +2093,8 @@ impl PatientDetail {
                     "The visit will be removed from the history.",
                 ))
                 .show_cancel(true)
-                .ok_text("Delete")
+                .cancel_text(t("Batal", "Cancel"))
+                .ok_text(t("Hapus", "Delete"))
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     this.update(cx, |detail, cx| detail.delete_entry(&id, window, cx))
@@ -2005,7 +2228,8 @@ impl PatientDetail {
                     "The patient will no longer appear in the lists.",
                 ))
                 .show_cancel(true)
-                .ok_text("Delete")
+                .cancel_text(t("Batal", "Cancel"))
+                .ok_text(t("Hapus", "Delete"))
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     this.update(cx, |detail, cx| detail.delete_patient(window, cx))
@@ -2245,7 +2469,8 @@ pub struct VisitEditor {
     id: SharedString,
     date: Entity<DatePickerState>,
     text: Entity<TextareaState>,
-    /// The text the editor started with.
+    /// The date and text the editor started with.
+    initial_date: NaiveDate,
     initial_text: String,
     /// Editing an existing visit (as opposed to writing a new one).
     existing: bool,
@@ -2309,6 +2534,7 @@ impl VisitEditor {
             id,
             date: date_state,
             text: text_state,
+            initial_date: date,
             initial_text: text,
             existing,
             from_html,
@@ -2327,6 +2553,12 @@ impl VisitEditor {
 
     fn text(&self, cx: &Context<Self>) -> String {
         self.text.read(cx).value().to_string()
+    }
+
+    /// Whether the date or the text was changed.
+    pub fn has_changes(&self, cx: &App) -> bool {
+        let same_date = matches!(self.date.read(cx).date(), Date::Single(Some(date)) if date == self.initial_date);
+        !same_date || self.text.read(cx).value().as_ref() != self.initial_text
     }
 
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3147,8 +3379,6 @@ impl Render for VisitsView {
 pub enum SettingsEvent {
     /// Every record was replaced by a backup.
     DataReplaced,
-    /// The interface language changed: every view is built again.
-    LanguageChanged,
 }
 
 pub struct SettingsView {
@@ -3199,6 +3429,11 @@ impl SettingsView {
 
     fn text(&self, cx: &Context<Self>) -> String {
         self.template.read(cx).value().to_string()
+    }
+
+    /// Whether the template was changed and not saved.
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.template.read(cx).value().as_ref() != self.saved
     }
 
     fn set_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -3412,7 +3647,8 @@ impl SettingsView {
                 .title(t("Pulihkan cadangan ini?", "Restore this backup?"))
                 .description(description.clone())
                 .show_cancel(true)
-                .ok_text("Restore")
+                .cancel_text(t("Batal", "Cancel"))
+                .ok_text(t("Pulihkan", "Restore"))
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
                     if let Some(backup) = backup.borrow_mut().take() {
@@ -3563,7 +3799,8 @@ impl SettingsView {
         set_language(language);
         save_preference(language).ok();
         set_menus(cx);
-        cx.emit(SettingsEvent::LanguageChanged);
+        // Every text is chosen when it is drawn: drawing again is enough.
+        cx.refresh_windows();
     }
 
     fn render_language(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3651,13 +3888,14 @@ impl Render for SettingsView {
 // Small presentational helpers shared by the views.
 // ============================================================================
 
-/// `2437` -> `2.437`, the Indonesian thousands separator.
+/// `2437` -> `2.437` (`2,437` in English).
 pub fn format_count(count: usize) -> String {
+    let separator = pick('.', ',');
     let digits = count.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push('.');
+            out.push(separator);
         }
         out.push(c);
     }

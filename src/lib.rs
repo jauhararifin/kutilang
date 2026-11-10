@@ -808,8 +808,12 @@ pub struct RecentDatabases {
 }
 
 /// The folder of the application's own files, the one the original
-/// application used (Go's `os.UserConfigDir`).
+/// application used (Go's `os.UserConfigDir`), or `KUTILANG_CONFIG_DIR` when
+/// set (for development, so the real settings are never touched).
 pub fn app_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("KUTILANG_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("kutilang")
