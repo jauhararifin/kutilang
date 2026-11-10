@@ -13,12 +13,11 @@ use std::time::Duration;
 
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyWindowHandle, AsyncApp, Context, Entity, Window};
-use kutilangv2::dates;
-use kutilangv2::i18n::Language;
-use kutilangv2::model::{DiagnosisFormat, PatientOrder};
-use kutilangv2::recent::RecentDatabases;
+use kutilangv2::Language;
+use kutilangv2::RecentDatabases;
 use kutilangv2::store::Store;
 use kutilangv2::ui::{self, KutilangApp, Section, Shell};
+use kutilangv2::{DiagnosisFormat, PatientOrder};
 
 async fn settle(cx: &mut AsyncApp) {
     cx.background_executor()
@@ -239,7 +238,7 @@ fn main() {
                 });
                 capture(window, &out, "06-visits", cx).await;
                 update(window, &app, cx, |app, window, cx| {
-                    let today = dates::today();
+                    let today = kutilangv2::today();
                     let week = today - chrono::Days::new(6);
                     app.visits()
                         .update(cx, |v, cx| v.set_dates(Some(week), Some(today), window, cx))
@@ -287,15 +286,15 @@ fn main() {
                 let counts_before = window.update(cx, |_, _, cx| app.read(cx).counts()).unwrap();
                 let extra = check
                     .create_patient(
-                        &kutilangv2::model::PatientInput {
+                        &kutilangv2::PatientInput {
                             name: "Zztest Pasien".into(),
                             head_family_name: String::new(),
                             birth_date: "1990-01-01".into(),
                             address: "Tes".into(),
                         }
-                        .validate(dates::today())
+                        .validate(kutilangv2::today())
                         .unwrap(),
-                        dates::today(),
+                        kutilangv2::today(),
                     )
                     .unwrap();
                 update(window, &app, cx, |app, window, cx| {
@@ -333,7 +332,7 @@ fn main() {
 
                 let started = std::time::Instant::now();
                 let report =
-                    kutilangv2::export::export_xlsx(&check, &out.join("export.xlsx")).unwrap();
+                    kutilangv2::store::export_xlsx(&check, &out.join("export.xlsx")).unwrap();
                 println!(
                     "ok: exported {} patients and {} visits in {:?}",
                     report.patients,
@@ -367,7 +366,7 @@ fn main() {
                 });
 
                 // Switching the language rebuilds the views in English, and back.
-                let preference = kutilangv2::recent::app_dir().join("language.txt");
+                let preference = kutilangv2::app_dir().join("language.txt");
                 let saved_preference = std::fs::read(&preference).ok();
                 for language in [Language::English, Language::Indonesian] {
                     update(window, &app, cx, move |app, _, cx| {
@@ -394,7 +393,7 @@ fn main() {
                         });
                     }
                 }
-                assert_eq!(kutilangv2::i18n::language(), Language::Indonesian);
+                assert_eq!(kutilangv2::language(), Language::Indonesian);
                 match saved_preference {
                     Some(bytes) => std::fs::write(&preference, bytes).unwrap(),
                     None => std::fs::remove_file(&preference).unwrap(),

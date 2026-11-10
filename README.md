@@ -56,7 +56,7 @@ understand the new schema. To go back, use the backup copy.
 
 * `PRAGMA user_version` records the schema version (currently 3) and a `meta`
   table where/when the database was migrated from. Later versions are reached
-  through small, ordered upgrade steps (`src/store/schema.rs`); version 3 added
+  through small, ordered upgrade steps (`UPGRADES` in `src/store.rs`); version 3 added
   the `settings` table.
 * Columns are `NOT NULL` with checks; rows carry `created_at`/`updated_at`.
 * `visits.diagnosis_format` is `html` (written with the old editor) or
@@ -146,16 +146,22 @@ Checks against a real database (not part of the repository):
 
 ```sh
 # every old entry converts to Markdown without losing text or bold
-KUTILANG_REAL_DB=/path/to/copy.sqlite3 cargo test --test real_data -- --ignored
+KUTILANG_REAL_DB=/path/to/copy.sqlite3 cargo test --test store real_data -- --ignored
 # render the main screens to PNG files (writes to the database: use a copy)
 cargo run --example screenshot -- /path/to/copy.sqlite3 /tmp/shots nur
 ```
 
-Layout: `src/store` (SQLite, schema, migrations, settings), `src/diagnosis`
-(template, HTML to Markdown, summaries), `src/ui` (GPUI views: `app` for the
-window and sidebar, `patients` and `patient_detail`, `visits`, `settings`,
-`visit_editor`, `profile_form`), `src/model.rs`, `src/dates.rs`,
-`src/keywords.rs`, `src/print.rs`.
+Layout, a few long files, each split into titled sections:
+
+* `src/lib.rs`: the data model, dates, the interface language, search
+  keywords, recent databases.
+* `src/store.rs`: SQLite (schema, migration of the original database,
+  patients, visits, settings), backup and restore, the Excel export.
+* `src/diagnosis.rs`: the visit template, HTML to Markdown, summaries,
+  printing.
+* `src/ui.rs`: every GPUI view (shell and database picker, main window,
+  Patients, Visits, Settings, the visit editor, the profile form, icons).
+* `src/main.rs`: the command line.
 
 The icons in `assets/icons` come from [Lucide](https://lucide.dev) (ISC
 license, see `assets/icons/LICENSE-LUCIDE`); the rest are bundled with GPUI Kit.

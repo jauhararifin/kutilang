@@ -74,7 +74,7 @@ fn main() -> ExitCode {
         }
     };
     if args.upgrade_only {
-        let db_path = args.db.unwrap_or_else(kutilangv2::recent::default_database);
+        let db_path = args.db.unwrap_or_else(kutilangv2::default_database);
         let existed = db_path.exists();
         return match Store::open(&db_path) {
             Ok((store, report)) => {

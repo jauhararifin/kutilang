@@ -1,14 +1,403 @@
-//! Converts the HTML written by the original app's rich text editor
-//! (draft.js) into Markdown, so an old record can be edited.
+//! Diagnosis text: the visit template, display preparation, the conversion of
+//! the original application's HTML to Markdown, and printing.
 //!
-//! It covers what that editor produced: paragraphs, `h1`-`h6`, bulleted and
-//! numbered lists (also nested), bold, italic, links, line breaks, and
-//! `<span>`s carrying pasted styles. Colours, fonts and underline have no
-//! Markdown equivalent and are dropped; the text is kept.
+//! New visits are written in Markdown. Visits of the original application
+//! stay in their HTML until their text is edited.
 
+use crate::{DiagnosisFormat, Patient, Visit, display_date};
+use anyhow::Result;
 use html5ever::tendril::TendrilSink as _;
 use html5ever::{ParseOpts, parse_document};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use std::path::{Path, PathBuf};
+
+// ============================================================================
+// The visit template, and preparing a diagnosis for display.
+// ============================================================================
+
+/// The template of a new entry, the Markdown version of the original
+/// application's template.
+///
+/// Built line by line so the trailing spaces after `**KU**:` and `1.` are
+/// explicit: typing right after `1.` must continue the numbered list, which
+/// needs the space.
+pub const TEMPLATE: &str = concat!(
+    "##### Subjektif\n",
+    "\n",
+    "**KU**: \n",
+    "\n",
+    "**RPS**: \n",
+    "\n",
+    "**RPD**: Maag (-), HT (-), DM (-), Asma (-), Tipes (-), Alergi obat (-), Sakit jantung (-), minum jamu / obat bebas (-)\n",
+    "\n",
+    "##### Objektif\n",
+    "\n",
+    "- **KU**: Baik, CM. **TD**: / mmHg, **HR**: x/mnt reguler, **BB**: kg, **TB**: cm.\n",
+    "- **Konj** anemis (-), **Sclera** Icterus (-). JVP R-2 cm, **Kel. tiroid**: dbn\n",
+    "- **Thorax**: SSD, SF: ka = ki. **Pulmo**: SD vesikuler, Ronchi: -, Wheezing: -.\n",
+    "- **Cor**: konfigurasi dbn, S1-S2 murni, bising (-), gallop (-).\n",
+    "- **Abd**: BU (+), venectasi (-), asites (-), **Hepar**: ttb, **Lien**: ttb. **Nyeri ketok CF**: ka (-) ki (-)\n",
+    "- **Extr**: edema -/-, Ulcus -/-, tremor (-), Palmar eritem (-). jari tabuh (-). ptechiae (-).\n",
+    "- **GDS**: mg/ml, **AU**: mg/ml, **Kol. Total**: mg/ml, **EKG**: \n",
+    "\n",
+    "##### Assesment\n",
+    "\n",
+    "1. \n",
+    "\n",
+    "##### Planning\n",
+    "\n",
+    "1. \n",
+);
+
+/// The Markdown shown in the editor for a diagnosis.
+pub fn editable_markdown(diagnosis: &str, format: DiagnosisFormat) -> String {
+    match format {
+        DiagnosisFormat::Markdown => diagnosis.to_string(),
+        DiagnosisFormat::Html => html_to_markdown(diagnosis),
+    }
+}
+
+fn fence_marker(line: &str) -> Option<(char, usize)> {
+    let trimmed = line.trim_start();
+    let c = trimmed.chars().next()?;
+    if c != '`' && c != '~' {
+        return None;
+    }
+    let count = trimmed.chars().take_while(|x| *x == c).count();
+    (count >= 3).then_some((c, count))
+}
+
+/// Prepares Markdown for display: every line break typed in the editor is
+/// shown as a line break, the way the old editor behaved, instead of
+/// Markdown's rule of joining consecutive lines into one paragraph.
+pub fn with_line_breaks(markdown: &str) -> String {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut out = String::with_capacity(markdown.len() + lines.len() * 2);
+    let mut fence: Option<(char, usize)> = None;
+
+    for (index, line) in lines.iter().enumerate() {
+        if let Some((c, count)) = fence_marker(line) {
+            match fence {
+                None => fence = Some((c, count)),
+                Some((open, open_count)) if open == c && count >= open_count => fence = None,
+                _ => {}
+            }
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        out.push_str(line);
+        let next_has_text = lines
+            .get(index + 1)
+            .is_some_and(|next| !next.trim().is_empty() && fence_marker(next).is_none());
+        let already_breaks = line.ends_with("  ") || line.ends_with('\\');
+        if fence.is_none() && !line.trim().is_empty() && next_has_text && !already_breaks {
+            out.push_str("  ");
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// The first lines of a diagnosis as plain text, for lists: section headings
+/// and template labels left empty (`RPS:`) are skipped, lines are joined with
+/// ` · ` and the result is cut to `max_chars`.
+pub fn summary(text: &str, format: DiagnosisFormat, max_chars: usize) -> String {
+    let lines = match format {
+        DiagnosisFormat::Html => html_lines(text, false),
+        DiagnosisFormat::Markdown => markdown_lines(text, false),
+    };
+    let mut out = String::new();
+    for line in lines {
+        let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if line.is_empty() || is_empty_label(&line) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(" · ");
+        }
+        out.push_str(&line);
+        if out.chars().count() >= max_chars {
+            break;
+        }
+    }
+    if out.chars().count() > max_chars {
+        out = out
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>();
+        out.push('…');
+    }
+    out
+}
+
+/// The whole diagnosis as plain text, one line per paragraph, list item or
+/// heading, for exporting.
+pub fn plain_text(text: &str, format: DiagnosisFormat) -> String {
+    let lines = match format {
+        DiagnosisFormat::Html => html_lines(text, true),
+        DiagnosisFormat::Markdown => markdown_lines(text, true),
+    };
+    lines
+        .into_iter()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `KU:` with nothing written after it.
+fn is_empty_label(line: &str) -> bool {
+    match line.split_once(':') {
+        Some((label, rest)) => rest.trim().is_empty() && label.chars().count() <= 30,
+        None => false,
+    }
+}
+
+/// Text lines of HTML, with or without the headings. A small scanner is
+/// enough here: the text is only read, never shown as HTML.
+fn html_lines(html: &str, keep_headings: bool) -> Vec<String> {
+    const BREAKS: [&str; 13] = [
+        "p", "div", "li", "br", "tr", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
+    ];
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut heading = false;
+    let mut rest = html;
+
+    let flush = |current: &mut String, heading: bool, lines: &mut Vec<String>| {
+        if !heading || keep_headings {
+            lines.push(decode_entities(current));
+        }
+        current.clear();
+    };
+
+    while let Some(start) = rest.find('<') {
+        current.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find('>') else {
+            rest = &rest[start..];
+            break;
+        };
+        let tag = &rest[start + 1..start + end];
+        rest = &rest[start + end + 1..];
+
+        let closing = tag.starts_with('/');
+        let name = tag
+            .trim_start_matches('/')
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if BREAKS.contains(&name.as_str()) {
+            flush(&mut current, heading, &mut lines);
+            if name.len() == 2 && name.starts_with('h') && name != "hr" {
+                heading = !closing;
+            }
+        }
+    }
+    current.push_str(rest);
+    flush(&mut current, heading, &mut lines);
+    lines
+}
+
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let decoded = after.find(';').filter(|end| *end <= 8).and_then(|end| {
+            let entity = &after[..end];
+            let c = match entity {
+                "nbsp" => Some(' '),
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" | "#39" => Some('\''),
+                _ => entity
+                    .strip_prefix('#')
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .and_then(char::from_u32),
+            };
+            c.map(|c| (c, end))
+        });
+        match decoded {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Text lines of Markdown, with or without the headings, without list
+/// markers or emphasis.
+fn markdown_lines(markdown: &str, keep_headings: bool) -> Vec<String> {
+    markdown
+        .lines()
+        .map(str::trim)
+        .filter(|line| keep_headings || !line.starts_with('#'))
+        .map(|line| line.trim_start_matches('#').trim_start())
+        .map(|line| {
+            let line = line
+                .strip_prefix("- ")
+                .or_else(|| line.strip_prefix("* "))
+                .or_else(|| line.strip_prefix("+ "))
+                .unwrap_or_else(|| {
+                    let digits = line.chars().take_while(char::is_ascii_digit).count();
+                    match line[digits..].strip_prefix(['.', ')']) {
+                        Some(rest) if digits > 0 && (rest.is_empty() || rest.starts_with(' ')) => {
+                            rest
+                        }
+                        _ => line,
+                    }
+                });
+            let mut text = String::with_capacity(line.len());
+            let mut chars = line.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => text.extend(chars.next()),
+                    '*' => {}
+                    _ => text.push(c),
+                }
+            }
+            text
+        })
+        .collect()
+}
+
+/// The diagnosis as HTML, for printing.
+pub fn to_html(diagnosis: &str, format: DiagnosisFormat) -> String {
+    match format {
+        // Exactly what the original application printed.
+        DiagnosisFormat::Html => diagnosis.to_string(),
+        DiagnosisFormat::Markdown => {
+            // Raw HTML in the Markdown is escaped, not interpreted.
+            markdown::to_html_with_options(&with_line_breaks(diagnosis), &markdown::Options::gfm())
+                .unwrap_or_else(|_| format!("<pre>{}</pre>", escape_html(diagnosis)))
+        }
+    }
+}
+
+#[cfg(test)]
+mod diagnosis_tests {
+    use super::*;
+
+    #[test]
+    fn line_breaks_become_hard_breaks() {
+        assert_eq!(
+            with_line_breaks("**KU**: lemas\n**RPS**: demam\n\n- a\n- b"),
+            "**KU**: lemas  \n**RPS**: demam\n\n- a  \n- b\n"
+        );
+    }
+
+    #[test]
+    fn code_fences_are_left_alone() {
+        assert_eq!(
+            with_line_breaks("a\n```\nx\ny\n```\nb"),
+            "a\n```\nx\ny\n```\nb\n"
+        );
+    }
+
+    #[test]
+    fn markdown_prints_with_breaks_and_escaped_html() {
+        let html = to_html("**KU**: lemas\nRPS: <b>x</b>", DiagnosisFormat::Markdown);
+        assert!(html.contains("<strong>KU</strong>: lemas<br />"), "{html}");
+        assert!(html.contains("&lt;b&gt;x&lt;/b&gt;"), "{html}");
+    }
+
+    #[test]
+    fn summaries_skip_headings_and_empty_labels() {
+        let html = "<h5>Subjektif</h5>\n<p><strong>KU</strong>: meriang&nbsp;</p>\
+                    <p><strong>RPS</strong>:</p><ul><li><strong>TD</strong>: 120/80 &amp; HR 80</li></ul>";
+        assert_eq!(
+            summary(html, DiagnosisFormat::Html, 160),
+            "KU: meriang · TD: 120/80 & HR 80"
+        );
+        let markdown =
+            TEMPLATE
+                .replace("**KU**: \n", "**KU**: lemas\n")
+                .replacen("1. \n", "1. ISPA\n", 1);
+        let text = summary(&markdown, DiagnosisFormat::Markdown, 2000);
+        assert!(text.starts_with("KU: lemas · RPD: Maag (-)"), "{text}");
+        assert!(text.ends_with("ISPA"), "{text}");
+        assert!(!text.contains("Subjektif") && !text.contains("RPS") && !text.contains("**"));
+        assert_eq!(
+            summary(TEMPLATE, DiagnosisFormat::Markdown, 20)
+                .chars()
+                .count(),
+            20
+        );
+        assert!(summary(TEMPLATE, DiagnosisFormat::Markdown, 20).ends_with('…'));
+        assert_eq!(summary("", DiagnosisFormat::Html, 20), "");
+    }
+
+    #[test]
+    fn plain_text_keeps_every_line() {
+        let html = "<h5>Subjektif</h5><p><strong>KU</strong>: meriang&nbsp;</p><ul><li>TD: 120/80</li></ul>";
+        assert_eq!(
+            plain_text(html, DiagnosisFormat::Html),
+            "Subjektif\nKU: meriang\nTD: 120/80"
+        );
+        let markdown = "##### Subjektif\n\n**KU**: lemas\n\n- **TD**: 120/80\n1. ISPA";
+        assert_eq!(
+            plain_text(markdown, DiagnosisFormat::Markdown),
+            "Subjektif\nKU: lemas\nTD: 120/80\nISPA"
+        );
+    }
+
+    #[test]
+    fn template_leaves_room_to_type_after_labels_and_numbers() {
+        assert!(TEMPLATE.contains("**KU**: \n"));
+        assert_eq!(TEMPLATE.matches("\n1. \n").count(), 2);
+        // Typing after "1. " continues the numbered list.
+        let filled = TEMPLATE.replacen("1. \n", "1. ISPA\n", 1);
+        assert!(to_html(&filled, DiagnosisFormat::Markdown).contains("<li>ISPA</li>"));
+    }
+
+    #[test]
+    fn template_renders_its_sections() {
+        let html = to_html(TEMPLATE, DiagnosisFormat::Markdown);
+        for section in ["Subjektif", "Objektif", "Assesment", "Planning"] {
+            assert!(
+                html.contains(&format!("<h5>{section}</h5>")),
+                "{section}: {html}"
+            );
+        }
+        assert!(html.contains("<strong>Nyeri ketok CF</strong>: ka (-) ki (-)"));
+        assert_eq!(html.matches("<li>").count(), 9, "{html}");
+    }
+
+    #[test]
+    fn html_entries_are_converted_for_editing() {
+        assert_eq!(
+            editable_markdown("<p><strong>KU</strong>: baik</p>", DiagnosisFormat::Html),
+            "**KU**: baik"
+        );
+        assert_eq!(
+            editable_markdown("**x**", DiagnosisFormat::Markdown),
+            "**x**"
+        );
+    }
+}
+
+// ============================================================================
+// Converts the HTML written by the original app's rich text editor
+// (draft.js) into Markdown, so an old record can be edited.
+//
+// It covers what that editor produced: paragraphs, `h1`-`h6`, bulleted and
+// numbered lists (also nested), bold, italic, links, line breaks, and
+// `<span>`s carrying pasted styles. Colours, fonts and underline have no
+// Markdown equivalent and are dropped; the text is kept.
+// ============================================================================
 
 #[derive(Debug)]
 enum Block {
@@ -165,7 +554,7 @@ fn block_element(name: &str, node: &Handle, blocks: &mut Vec<Block>) {
         }
         "pre" => {
             let mut text = String::new();
-            plain_text(node, &mut text);
+            node_text(node, &mut text);
             if !text.trim().is_empty() {
                 blocks.push(Block::Code(text.trim_end().to_string()));
             }
@@ -202,13 +591,13 @@ fn list_block(node: &Handle, ordered: bool) -> Block {
     Block::List { ordered, items }
 }
 
-fn plain_text(node: &Handle, out: &mut String) {
+fn node_text(node: &Handle, out: &mut String) {
     match &node.data {
         NodeData::Text { contents } => out.push_str(&contents.borrow()),
         NodeData::Element { name, .. } if name.local.as_ref() == "br" => out.push('\n'),
         _ => {
             for child in node.children.borrow().iter() {
-                plain_text(child, out);
+                node_text(child, out);
             }
         }
     }
@@ -510,7 +899,7 @@ impl Inline {
 
     fn code(&mut self, node: &Handle) {
         let mut text = String::new();
-        plain_text(node, &mut text);
+        node_text(node, &mut text);
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         if text.is_empty() {
             return;
@@ -568,7 +957,7 @@ impl Inline {
 }
 
 #[cfg(test)]
-mod tests {
+mod html_to_markdown_tests {
     use super::html_to_markdown as md;
 
     #[test]
@@ -689,6 +1078,165 @@ mod tests {
         assert_eq!(
             md(html),
             "##### Subjektif\n\n**KU**:\n\n- **GDS**: mg/ml, **EKG**:\n\n##### Planning\n\n1."
+        );
+    }
+}
+
+// ============================================================================
+// Printing a visit.
+//
+// GPUI has no printing support, so the record is written as an HTML page
+// that opens the print dialog when the browser loads it, the same output the
+// original application printed.
+// ============================================================================
+
+pub fn escape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The printable page of a visit.
+pub fn visit_page(patient: &Patient, visit: &Visit) -> String {
+    let name = if patient.head_family_name.trim().is_empty() {
+        escape_html(&patient.name)
+    } else {
+        format!(
+            "{} / {}",
+            escape_html(&patient.name),
+            escape_html(&patient.head_family_name)
+        )
+    };
+    let visit_date = display_date(&visit.date);
+    format!(
+        r#"<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<style>
+  body {{ font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 24px; color: #000; }}
+  .profile {{ border: 1px solid #000; padding: 10px; }}
+  .profile th {{ text-align: left; padding: 4px 16px 4px 0; vertical-align: top; white-space: nowrap; }}
+  .profile td {{ padding: 4px 0; }}
+  .date {{ text-align: center; padding-top: 20px; font-size: 1.15em; }}
+  .diagnosis {{ margin-top: 20px; padding: 5px; font-size: 12px; }}
+  @media print {{ body {{ margin: 0; }} }}
+</style>
+</head>
+<body onload="window.print()">
+<div class="profile">
+<table>
+<tr><th>Nama</th><td>{name}</td></tr>
+<tr><th>Tanggal Lahir</th><td>{birth_date}</td></tr>
+<tr><th>Alamat</th><td>{address}</td></tr>
+<tr><th>Kunjungan Terakhir</th><td>{last_visit}</td></tr>
+</table>
+</div>
+<h5 class="date">{visit_date}</h5>
+<div class="diagnosis">{diagnosis}</div>
+</body>
+</html>
+"#,
+        title = escape_html(&format!("{} - {}", patient.name, visit_date)),
+        birth_date = escape_html(&display_date(&patient.birth_date)),
+        address = escape_html(&patient.address).replace('\n', "<br>"),
+        last_visit = escape_html(&display_date(&patient.last_visit)),
+        visit_date = escape_html(&visit_date),
+        diagnosis = to_html(&visit.diagnosis, visit.format),
+    )
+}
+
+/// Writes the printable page into the temporary directory.
+pub fn write_visit_page(patient: &Patient, visit: &Visit) -> Result<PathBuf> {
+    let dir = std::env::temp_dir().join("kutilang-print");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("visit-{}.html", visit.id));
+    std::fs::write(&path, visit_page(patient, visit))?;
+    Ok(path)
+}
+
+/// A `file://` URL for a local path, percent-encoded.
+pub fn file_url(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let mut url = String::from("file://");
+    if !path.starts_with('/') {
+        url.push('/'); // Windows drive paths: file:///C:/...
+    }
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                url.push(byte as char)
+            }
+            _ => url.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    url
+}
+
+#[cfg(test)]
+mod print_tests {
+    use super::*;
+    use crate::DiagnosisFormat;
+
+    fn patient() -> Patient {
+        Patient {
+            id: "p".into(),
+            name: "Siti <Aminah>".into(),
+            head_family_name: "Joko".into(),
+            birth_date: "1990-01-05".into(),
+            address: "Jl. Mawar".into(),
+            last_visit: "2026-11-07".into(),
+        }
+    }
+
+    #[test]
+    fn page_contains_profile_and_diagnosis() {
+        let visit = Visit {
+            id: "v".into(),
+            patient_id: "p".into(),
+            date: "2026-11-07".into(),
+            diagnosis: "**KU**: baik".into(),
+            format: DiagnosisFormat::Markdown,
+        };
+        let page = visit_page(&patient(), &visit);
+        assert!(page.contains("Siti &lt;Aminah&gt; / Joko"));
+        assert!(page.contains("5 Januari 1990"));
+        assert!(page.contains("<h5 class=\"date\">7 November 2026</h5>"));
+        assert!(page.contains("<strong>KU</strong>: baik"));
+        assert!(page.contains("window.print()"));
+    }
+
+    #[test]
+    fn html_entries_print_unchanged() {
+        let visit = Visit {
+            id: "v".into(),
+            patient_id: "p".into(),
+            date: "2021-08-23".into(),
+            diagnosis: "<p><strong>KU</strong>: baik</p>".into(),
+            format: DiagnosisFormat::Html,
+        };
+        assert!(visit_page(&patient(), &visit).contains("<p><strong>KU</strong>: baik</p>"));
+    }
+
+    #[test]
+    fn file_urls() {
+        assert_eq!(
+            file_url(Path::new("/tmp/kutilang print/v.html")),
+            "file:///tmp/kutilang%20print/v.html"
+        );
+        assert_eq!(
+            file_url(Path::new("C:\\Users\\Dr A\\v.html")),
+            "file:///C:/Users/Dr%20A/v.html"
         );
     }
 }
