@@ -1,5 +1,6 @@
 //! SQLite storage.
 
+mod data;
 mod migrate;
 mod schema;
 
@@ -12,6 +13,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension as _, Row, params, params_from_iter};
 use uuid::Uuid;
 
+pub use data::{Backup, ExportPatient, ExportVisit, timestamped_path};
 pub use migrate::MigrationReport;
 pub use schema::SCHEMA_VERSION;
 

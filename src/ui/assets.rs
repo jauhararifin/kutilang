@@ -12,10 +12,11 @@ macro_rules! extra_icons {
     };
 }
 
-const EXTRA_ICONS: [(&str, &[u8]); 10] = extra_icons!(
+const EXTRA_ICONS: [(&str, &[u8]); 11] = extra_icons!(
     "arrow-down-a-z",
     "bold",
     "clock",
+    "database",
     "pencil",
     "printer",
     "rotate-ccw",
@@ -59,6 +60,9 @@ mod tests {
             IconName::Bold,
             IconName::Calendar,
             IconName::Clock,
+            IconName::Database,
+            IconName::FolderOpen,
+            IconName::Close,
             IconName::Eye,
             IconName::Inbox,
             IconName::Pencil,

@@ -12,8 +12,8 @@ use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, px};
 
 use crate::store::{MigrationReport, Store};
 use crate::ui::patients::{PatientsEvent, PatientsView};
-use crate::ui::{NewPatient, ShowPatients, ShowSettings, ShowVisits};
-use crate::ui::settings::SettingsView;
+use crate::ui::{BackUp, ExportToExcel, NewPatient, RestoreBackup, ShowPatients, ShowSettings, ShowVisits};
+use crate::ui::settings::{SettingsEvent, SettingsView};
 use crate::ui::visits::{VisitsEvent, VisitsView};
 use crate::ui::widgets;
 
@@ -29,6 +29,7 @@ pub enum Section {
 
 pub struct KutilangApp {
     store: Rc<Store>,
+    db_path: PathBuf,
     section: Section,
     patients: Entity<PatientsView>,
     visits: Entity<VisitsView>,
@@ -37,7 +38,32 @@ pub struct KutilangApp {
     visit_count: usize,
     /// Visits changed since the Visits section was last shown.
     visits_stale: bool,
+    /// Subscriptions to the Patients and Visits views.
+    record_subscriptions: Vec<Subscription>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The Patients and Visits views, and the app's subscriptions to them.
+fn record_views(
+    store: &Rc<Store>,
+    window: &mut Window,
+    cx: &mut Context<KutilangApp>,
+) -> (Entity<PatientsView>, Entity<VisitsView>, Vec<Subscription>) {
+    let patients = cx.new(|cx| PatientsView::new(store.clone(), window, cx));
+    let visits = cx.new(|cx| VisitsView::new(store.clone(), window, cx));
+    let subscriptions = vec![
+        cx.subscribe_in(&patients, window, |this, _, event, _, cx| match event {
+            PatientsEvent::Changed => {
+                this.visits_stale = true;
+                this.refresh_counts();
+                cx.notify();
+            }
+        }),
+        cx.subscribe_in(&visits, window, |this, _, event, window, cx| match event {
+            VisitsEvent::OpenPatient(id) => this.open_patient(id, window, cx),
+        }),
+    ];
+    (patients, visits, subscriptions)
 }
 
 impl KutilangApp {
@@ -48,22 +74,13 @@ impl KutilangApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let patients = cx.new(|cx| PatientsView::new(store.clone(), window, cx));
-        let visits = cx.new(|cx| VisitsView::new(store.clone(), window, cx));
-        let settings = cx.new(|cx| SettingsView::new(store.clone(), db_path, window, cx));
-
-        let subscriptions = vec![
-            cx.subscribe_in(&patients, window, |this, _, event, _, cx| match event {
-                PatientsEvent::Changed => {
-                    this.visits_stale = true;
-                    this.refresh_counts();
-                    cx.notify();
-                }
-            }),
-            cx.subscribe_in(&visits, window, |this, _, event, window, cx| match event {
-                VisitsEvent::OpenPatient(id) => this.open_patient(id, window, cx),
-            }),
-        ];
+        let (patients, visits, record_subscriptions) = record_views(&store, window, cx);
+        let settings = cx.new(|cx| SettingsView::new(store.clone(), db_path.clone(), window, cx));
+        let subscriptions = vec![cx.subscribe_in(&settings, window, |this, _, event, window, cx| {
+            match event {
+                SettingsEvent::DataReplaced => this.reload_records(window, cx),
+            }
+        })];
 
         if let Some(report) = migration {
             cx.defer_in(window, move |_, window, cx| {
@@ -74,6 +91,7 @@ impl KutilangApp {
 
         let mut app = Self {
             store,
+            db_path,
             section: Section::Patients,
             patients,
             visits,
@@ -81,6 +99,7 @@ impl KutilangApp {
             patient_count: 0,
             visit_count: 0,
             visits_stale: false,
+            record_subscriptions,
             _subscriptions: subscriptions,
         };
         app.refresh_counts();
@@ -99,8 +118,24 @@ impl KutilangApp {
         &self.visits
     }
 
+    pub fn counts(&self) -> (usize, usize) {
+        (self.patient_count, self.visit_count)
+    }
+
     pub fn settings(&self) -> &Entity<SettingsView> {
         &self.settings
+    }
+
+    /// Builds the Patients and Visits views again, after every record was
+    /// replaced.
+    fn reload_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (patients, visits, subscriptions) = record_views(&self.store, window, cx);
+        self.patients = patients;
+        self.visits = visits;
+        self.record_subscriptions = subscriptions;
+        self.visits_stale = false;
+        self.refresh_counts();
+        cx.notify();
     }
 
     fn refresh_counts(&mut self) {
@@ -191,6 +226,17 @@ impl KutilangApp {
             .child(Icon::new(IconName::Stethoscope).text_color(cx.theme().primary))
             .child(div().font_weight(FontWeight::SEMIBOLD).child("Kutilang"))
             .child(div().text_color(cx.theme().muted_foreground).child(BRAND))
+            .child(div().text_color(cx.theme().muted_foreground).child("·"))
+            .child(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        self.db_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    ),
+            )
     }
 }
 
@@ -229,6 +275,15 @@ impl Render for KutilangApp {
             .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
                 this.show(Section::Settings, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &BackUp, window, cx| {
+                this.settings.update(cx, |settings, cx| settings.back_up(window, cx))
+            }))
+            .on_action(cx.listener(|this, _: &RestoreBackup, window, cx| {
+                this.settings.update(cx, |settings, cx| settings.restore(window, cx))
+            }))
+            .on_action(cx.listener(|this, _: &ExportToExcel, window, cx| {
+                this.settings.update(cx, |settings, cx| settings.export(window, cx))
+            }))
             .on_action(cx.listener(|this, _: &NewPatient, window, cx| {
                 this.show(Section::Patients, window, cx);
                 this.patients.update(cx, |patients, cx| patients.new_patient(window, cx));
@@ -241,40 +296,6 @@ impl Render for KutilangApp {
                     .w_full()
                     .child(self.render_sidebar(cx))
                     .child(div().flex_1().min_w(px(0.)).h_full().child(content)),
-            )
-    }
-}
-
-/// Shown instead of the application when the database cannot be opened.
-pub struct ErrorView {
-    pub path: String,
-    pub message: String,
-}
-
-impl Render for ErrorView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(TitleBar::new().child(div().text_sm().child("Kutilang")))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .p_8()
-                    .gap_3()
-                    .child(
-                        div()
-                            .text_xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Cannot open the database"),
-                    )
-                    .child(div().child(self.path.clone()))
-                    .child(div().text_color(cx.theme().danger).child(self.message.clone()))
-                    .child(widgets::muted(
-                        "Nothing was changed. Close this window, check the file, and try again.",
-                        cx,
-                    )),
             )
     }
 }

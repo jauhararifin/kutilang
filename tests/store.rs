@@ -422,3 +422,88 @@ fn upgrades_a_version_2_database() {
     assert_eq!(store.get_patient("a").unwrap().unwrap().name, "Siti Aminah");
     store.set_diagnosis_template(Some("x")).unwrap();
 }
+
+#[test]
+fn backs_up_and_restores_everything() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = Store::open(&dir.path().join("db.sqlite3")).unwrap();
+    let siti = store.create_patient(&profile("Siti", "Joko"), date(2026, 1, 1)).unwrap();
+    store.add_visit(&siti.id, date(2026, 11, 1), "**KU**: demam").unwrap();
+    store.set_diagnosis_template(Some("**Keluhan**: \n")).unwrap();
+
+    let backup = dir.path().join("backup.sqlite3");
+    std::fs::write(&backup, b"an older file").unwrap();
+    store.backup_to(&backup).unwrap();
+
+    // Changes after the backup are undone by restoring it.
+    let budi = store.create_patient(&profile("Budi", ""), date(2026, 1, 2)).unwrap();
+    store.add_visit(&budi.id, date(2026, 11, 2), "batuk").unwrap();
+    store.set_diagnosis_template(None).unwrap();
+    store.delete_patient(&siti.id).unwrap();
+
+    let opened = Store::open_backup(&backup).unwrap();
+    assert_eq!((opened.patients, opened.visits), (1, 1));
+    store.restore(&opened).unwrap();
+    assert_eq!(store.count_patients().unwrap(), 1);
+    assert_eq!(store.count_visits().unwrap(), 1);
+    assert!(store.get_patient(&budi.id).unwrap().is_none());
+    assert_eq!(store.get_patient(&siti.id).unwrap().unwrap().name, "Siti");
+    assert_eq!(store.list_patients("siti", PatientOrder::Name).unwrap().len(), 1);
+    assert_eq!(store.diagnosis_template(), "**Keluhan**: \n");
+    let restored_from: String = store
+        .connection()
+        .query_row("SELECT value FROM meta WHERE key = 'restored_from'", [], |r| r.get(0))
+        .unwrap();
+    assert!(restored_from.ends_with("backup.sqlite3"));
+}
+
+#[test]
+fn restores_a_database_of_the_go_application_without_changing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("old.sqlite3");
+    write_go_database(&old);
+    let before = std::fs::read(&old).unwrap();
+
+    let store = Store::open_in_memory().unwrap();
+    let opened = Store::open_backup(&old).unwrap();
+    assert_eq!((opened.patients, opened.visits), (2, 2));
+    store.restore(&opened).unwrap();
+    assert_eq!(store.get_patient("a").unwrap().unwrap().last_visit, "2024-03-01");
+    assert_eq!(std::fs::read(&old).unwrap(), before, "the chosen file is not modified");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "no backup written next to it");
+}
+
+#[test]
+fn refuses_to_restore_other_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = dir.path().join("notes.sqlite3");
+    Connection::open(&other).unwrap().execute_batch("CREATE TABLE notes (body TEXT);").unwrap();
+    let text = dir.path().join("notes.txt");
+    std::fs::write(&text, "hello").unwrap();
+    let store = Store::open_in_memory().unwrap();
+    store.create_patient(&profile("Siti", ""), date(2026, 1, 1)).unwrap();
+    assert!(Store::open_backup(&other).is_err());
+    assert!(Store::open_backup(&text).is_err());
+    assert_eq!(store.count_patients().unwrap(), 1, "nothing replaced");
+}
+
+#[test]
+fn exports_patients_and_visits_to_excel() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let siti = store.create_patient(&profile("Siti", "Joko"), date(2026, 1, 1)).unwrap();
+    store.add_visit(&siti.id, date(2026, 11, 1), "##### Subjektif\n\n**KU**: demam").unwrap();
+    store.add_visit(&siti.id, date(8, 1, 29), "tanggal salah ketik").unwrap();
+    let gone = store.create_patient(&profile("Budi", ""), date(2026, 1, 1)).unwrap();
+    store.delete_patient(&gone.id).unwrap();
+
+    let exported = store.export_visits().unwrap();
+    assert_eq!(exported.len(), 2);
+    assert_eq!(store.export_patients().unwrap()[0].visits, 2);
+
+    let path = dir.path().join("kutilang.xlsx");
+    let report = kutilangv2::export::export_xlsx(&store, &path).unwrap();
+    assert_eq!((report.patients, report.visits), (1, 2));
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(bytes.starts_with(b"PK"), "an xlsx (zip) file");
+}

@@ -12,10 +12,12 @@ Kutilang: medical records for a clinic.
 Usage: kutilangv2 [--db PATH] [--upgrade-only]
 
 Options:
-  --db PATH        Database file. Defaults to the one used by the original
-                   application: <config dir>/kutilang/db.sqlite3
+  --db PATH        Open this database. Without it, the application starts on
+                   a list of the recently opened databases.
   --upgrade-only   Upgrade the database to the current format (if needed),
                    print what was done and exit without opening a window.
+                   Without --db, the original application's database:
+                   <config dir>/kutilang/db.sqlite3
   -h, --help       Show this help.
   -V, --version    Show the version.
 
@@ -59,14 +61,6 @@ fn parse_args() -> Result<Option<Args>, String> {
     Ok(Some(args))
 }
 
-/// The location used by the original application (Go's `os.UserConfigDir`).
-fn default_db_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("kutilang")
-        .join("db.sqlite3")
-}
-
 fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(Some(args)) => args,
@@ -76,9 +70,8 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let db_path = args.db.unwrap_or_else(default_db_path);
-
     if args.upgrade_only {
+        let db_path = args.db.unwrap_or_else(kutilangv2::recent::default_database);
         let existed = db_path.exists();
         return match Store::open(&db_path) {
             Ok((store, report)) => {
@@ -109,6 +102,6 @@ fn main() -> ExitCode {
         };
     }
 
-    kutilangv2::ui::run(db_path);
+    kutilangv2::ui::run(args.db);
     ExitCode::SUCCESS
 }

@@ -99,8 +99,8 @@ pub fn with_line_breaks(markdown: &str) -> String {
 /// ` · ` and the result is cut to `max_chars`.
 pub fn summary(text: &str, format: DiagnosisFormat, max_chars: usize) -> String {
     let lines = match format {
-        DiagnosisFormat::Html => html_lines(text),
-        DiagnosisFormat::Markdown => markdown_lines(text),
+        DiagnosisFormat::Html => html_lines(text, false),
+        DiagnosisFormat::Markdown => markdown_lines(text, false),
     };
     let mut out = String::new();
     for line in lines {
@@ -123,6 +123,21 @@ pub fn summary(text: &str, format: DiagnosisFormat, max_chars: usize) -> String 
     out
 }
 
+/// The whole diagnosis as plain text, one line per paragraph, list item or
+/// heading, for exporting.
+pub fn plain_text(text: &str, format: DiagnosisFormat) -> String {
+    let lines = match format {
+        DiagnosisFormat::Html => html_lines(text, true),
+        DiagnosisFormat::Markdown => markdown_lines(text, true),
+    };
+    lines
+        .into_iter()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// `KU:` with nothing written after it.
 fn is_empty_label(line: &str) -> bool {
     match line.split_once(':') {
@@ -131,9 +146,9 @@ fn is_empty_label(line: &str) -> bool {
     }
 }
 
-/// Text lines of HTML, without headings. A small scanner is enough here: the
-/// text only feeds a one-line summary.
-fn html_lines(html: &str) -> Vec<String> {
+/// Text lines of HTML, with or without the headings. A small scanner is
+/// enough here: the text is only read, never shown as HTML.
+fn html_lines(html: &str, keep_headings: bool) -> Vec<String> {
     const BREAKS: [&str; 13] = [
         "p", "div", "li", "br", "tr", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
     ];
@@ -143,7 +158,7 @@ fn html_lines(html: &str) -> Vec<String> {
     let mut rest = html;
 
     let flush = |current: &mut String, heading: bool, lines: &mut Vec<String>| {
-        if !heading {
+        if !heading || keep_headings {
             lines.push(decode_entities(current));
         }
         current.clear();
@@ -214,12 +229,14 @@ fn decode_entities(text: &str) -> String {
     out
 }
 
-/// Text lines of Markdown, without headings, list markers or emphasis.
-fn markdown_lines(markdown: &str) -> Vec<String> {
+/// Text lines of Markdown, with or without the headings, without list
+/// markers or emphasis.
+fn markdown_lines(markdown: &str, keep_headings: bool) -> Vec<String> {
     markdown
         .lines()
         .map(str::trim)
-        .filter(|line| !line.starts_with('#'))
+        .filter(|line| keep_headings || !line.starts_with('#'))
+        .map(|line| line.trim_start_matches('#').trim_start())
         .map(|line| {
             let line = line
                 .strip_prefix("- ")
@@ -301,6 +318,17 @@ mod tests {
         assert_eq!(summary(TEMPLATE, DiagnosisFormat::Markdown, 20).chars().count(), 20);
         assert!(summary(TEMPLATE, DiagnosisFormat::Markdown, 20).ends_with('…'));
         assert_eq!(summary("", DiagnosisFormat::Html, 20), "");
+    }
+
+    #[test]
+    fn plain_text_keeps_every_line() {
+        let html = "<h5>Subjektif</h5><p><strong>KU</strong>: meriang&nbsp;</p><ul><li>TD: 120/80</li></ul>";
+        assert_eq!(plain_text(html, DiagnosisFormat::Html), "Subjektif\nKU: meriang\nTD: 120/80");
+        let markdown = "##### Subjektif\n\n**KU**: lemas\n\n- **TD**: 120/80\n1. ISPA";
+        assert_eq!(
+            plain_text(markdown, DiagnosisFormat::Markdown),
+            "Subjektif\nKU: lemas\nTD: 120/80\nISPA"
+        );
     }
 
     #[test]

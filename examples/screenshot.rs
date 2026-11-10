@@ -18,7 +18,8 @@ use gpui_kit::{
 use kutilangv2::dates;
 use kutilangv2::model::{DiagnosisFormat, PatientOrder};
 use kutilangv2::store::Store;
-use kutilangv2::ui::{self, KutilangApp, Section};
+use kutilangv2::recent::RecentDatabases;
+use kutilangv2::ui::{self, KutilangApp, Section, Shell};
 
 async fn settle(cx: &mut AsyncApp) {
     cx.background_executor().timer(Duration::from_millis(500)).await;
@@ -76,7 +77,7 @@ fn main() {
 
     gpui_kit::application().with_assets(ui::Assets).run(move |cx| {
         ui::init(cx);
-        let (store, report) = Store::open(&db).expect("open database");
+        let (store, _) = Store::open(&db).expect("open database");
         let store = Rc::new(store);
         let check = store.clone();
         let patient = store
@@ -86,13 +87,42 @@ fn main() {
             .next()
             .expect("a patient matching the query");
 
-        let (window, app) = gpui_kit::open_window(ui::window_options(cx), cx, |window, cx| {
-            cx.new(|cx| KutilangApp::new(store.clone(), report, db.clone(), window, cx))
+        // The picker, with this database and one that was moved away.
+        let recent_file = out.join("recent-databases.txt");
+        let mut recent = RecentDatabases::load(recent_file.clone());
+        recent.add(&out.join("moved-away.sqlite3")).unwrap();
+        recent.add(&db).unwrap();
+        let (window, shell) = gpui_kit::open_window(ui::window_options(cx), cx, |window, cx| {
+            cx.new(|cx| Shell::new(recent, None, window, cx))
         })
         .expect("open window");
         cx.activate(true);
 
         cx.spawn(async move |cx| {
+            capture(window, &out, "00-launcher", cx).await;
+
+            // A file that is not a Kutilang database is refused; the picker stays.
+            let other = out.join("notes.sqlite3");
+            rusqlite::Connection::open(&other)
+                .unwrap()
+                .execute_batch("CREATE TABLE IF NOT EXISTS notes (body TEXT);")
+                .unwrap();
+            window
+                .update(cx, |_, window, cx| shell.update(cx, |s, cx| s.open(&other, window, cx)))
+                .unwrap();
+            settle(cx).await;
+            let opened = window.update(cx, |_, _, cx| shell.read(cx).app().is_some()).unwrap();
+            assert!(!opened, "a foreign file is not opened");
+            println!("ok: a file that is not a Kutilang database is refused");
+
+            window
+                .update(cx, |_, window, cx| shell.update(cx, |s, cx| s.open(&db, window, cx)))
+                .unwrap();
+            let app = window.update(cx, |_, _, cx| shell.read(cx).app().cloned()).unwrap().expect("opened");
+            let first = RecentDatabases::load(recent_file.clone()).entries()[0].path.clone();
+            assert_eq!(first, db.canonicalize().unwrap(), "the opened database is remembered first");
+            println!("ok: the database opened from the picker is remembered first");
+
             capture(window, &out, "01-patients", cx).await;
 
             update(window, &app, cx, |app, window, cx| {
@@ -200,6 +230,58 @@ fn main() {
             assert_eq!(composer_text, "**Keluhan**: \n\n**Terapi**: \n");
             println!("ok: the composer starts from the saved template");
 
+            // Backup and restore: a patient added after the backup is gone
+            // once it is restored, and the data before the restore is kept.
+            let backup = out.join("backup.sqlite3");
+            check.backup_to(&backup).unwrap();
+            let counts_before = window.update(cx, |_, _, cx| app.read(cx).counts()).unwrap();
+            let extra = check
+                .create_patient(
+                    &kutilangv2::model::PatientInput {
+                        name: "Zztest Pasien".into(),
+                        head_family_name: String::new(),
+                        birth_date: "1990-01-01".into(),
+                        address: "Tes".into(),
+                    }
+                    .validate(dates::today())
+                    .unwrap(),
+                    dates::today(),
+                )
+                .unwrap();
+            update(window, &app, cx, |app, window, cx| {
+                app.show(Section::Settings, window, cx);
+                let settings = app.settings().clone();
+                let backup = backup.clone();
+                settings.update(cx, |s, cx| s.confirm_restore(&backup, window, cx));
+            });
+            capture(window, &out, "11-restore-confirm", cx).await;
+            update(window, &app, cx, |app, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                window.close_all_dialogs(cx);
+                let opened = Store::open_backup(&backup).unwrap();
+                let settings = app.settings().clone();
+                settings.update(cx, |s, cx| s.apply_restore(opened, window, cx));
+            });
+            settle(cx).await;
+            assert!(check.get_patient(&extra.id).unwrap().is_none(), "restored over the extra patient");
+            let counts_after = window.update(cx, |_, _, cx| app.read(cx).counts()).unwrap();
+            assert_eq!(counts_after, counts_before, "the sidebar counts follow the restore");
+            let kept = std::fs::read_dir(db.parent().unwrap())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().contains("before-restore"));
+            assert!(kept, "the data before the restore was saved");
+            println!("ok: restore replaces the data, refreshes the views and keeps the previous data");
+
+            let started = std::time::Instant::now();
+            let report = kutilangv2::export::export_xlsx(&check, &out.join("export.xlsx")).unwrap();
+            println!(
+                "ok: exported {} patients and {} visits in {:?}",
+                report.patients,
+                report.visits,
+                started.elapsed()
+            );
+
             // Dialogs.
             update(window, &app, cx, |app, window, cx| {
                 app.show(Section::Patients, window, cx);
@@ -211,7 +293,10 @@ fn main() {
                 use gpui_kit::component::WindowExt as _;
                 window.close_all_dialogs(cx);
             });
-            update(window, &app, cx, |app, window, cx| {
+            let id = patient.id.clone();
+            update(window, &app, cx, move |app, window, cx| {
+                // The restore rebuilt the views: open the patient again.
+                app.open_patient(&id, window, cx);
                 let detail = app.patients().read(cx).detail().unwrap().clone();
                 let first = detail.read(cx).entry_ids(cx)[0].clone();
                 detail.update(cx, |d, cx| d.confirm_delete_entry(first, window, cx));

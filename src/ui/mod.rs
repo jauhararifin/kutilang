@@ -3,16 +3,17 @@
 mod app;
 mod assets;
 mod entry;
+mod launcher;
 mod patient_detail;
 mod patients;
 mod profile_form;
 mod settings;
+mod shell;
 mod visit_editor;
 mod visits;
 mod widgets;
 
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use gpui_kit::component::{Theme, TitleBar};
 use gpui_kit::prelude::*;
@@ -21,20 +22,33 @@ use gpui_kit::{
     WindowOptions, px, size,
 };
 
-pub use app::{BRAND, ErrorView, KutilangApp, Section};
+pub use app::{BRAND, KutilangApp, Section};
 pub use assets::Assets;
 pub use patient_detail::PatientDetail;
 pub use patients::{PatientList, PatientsView};
 pub use profile_form::ProfileForm;
-pub use settings::SettingsView;
+pub use launcher::Launcher;
+pub use settings::{SettingsEvent, SettingsView};
+pub use shell::Shell;
 pub use visit_editor::VisitEditor;
 pub use visits::{VisitList, VisitsView};
 
-use crate::store::Store;
+use crate::recent::RecentDatabases;
 
 gpui_kit::actions!(
     kutilang,
-    [Quit, ShowPatients, ShowVisits, ShowSettings, NewPatient]
+    [
+        Quit,
+        ShowPatients,
+        ShowVisits,
+        ShowSettings,
+        NewPatient,
+        BackUp,
+        RestoreBackup,
+        ExportToExcel,
+        OpenDatabase,
+        CloseDatabase
+    ]
 );
 
 /// Base text size. The component library's default (16 px) is sized for web
@@ -79,6 +93,7 @@ pub fn init(cx: &mut App) {
                 KeyBinding::new(concat!($modifier, "-2"), ShowVisits, None),
                 KeyBinding::new(concat!($modifier, "-,"), ShowSettings, None),
                 KeyBinding::new(concat!($modifier, "-n"), NewPatient, None),
+                KeyBinding::new(concat!($modifier, "-o"), OpenDatabase, None),
             ]
         };
     }
@@ -92,7 +107,16 @@ pub fn init(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Quit Kutilang", Quit),
         ]),
-        Menu::new("File").items([MenuItem::action("New Patient…", NewPatient)]),
+        Menu::new("File").items([
+            MenuItem::action("Open Database…", OpenDatabase),
+            MenuItem::action("Close Database", CloseDatabase),
+            MenuItem::separator(),
+            MenuItem::action("New Patient…", NewPatient),
+            MenuItem::separator(),
+            MenuItem::action("Back Up…", BackUp),
+            MenuItem::action("Restore…", RestoreBackup),
+            MenuItem::action("Export to Excel…", ExportToExcel),
+        ]),
         Menu::new("View").items([
             MenuItem::action("Patients", ShowPatients),
             MenuItem::action("Visits", ShowVisits),
@@ -106,32 +130,16 @@ pub fn init(cx: &mut App) {
     .detach();
 }
 
-/// Opens the database at `db_path` (upgrading it if needed) and runs the
-/// application until its window is closed.
-pub fn run(db_path: PathBuf) {
+/// Runs the application until its window is closed: opens `database`, or
+/// shows the database picker.
+pub fn run(database: Option<PathBuf>) {
     gpui_kit::application().with_assets(Assets).run(move |cx| {
         init(cx);
         let options = window_options(cx);
-        let opened = match Store::open(&db_path) {
-            Ok((store, report)) => {
-                if let Some(report) = &report {
-                    eprintln!("kutilang: upgraded {} ({report:?})", db_path.display());
-                }
-                let path = db_path.clone();
-                gpui_kit::open_window(options, cx, |window, cx| {
-                    cx.new(|cx| KutilangApp::new(Rc::new(store), report, path, window, cx))
-                })
-                .map(|_| ())
-            }
-            Err(error) => {
-                eprintln!("kutilang: cannot open {}: {error:#}", db_path.display());
-                let view = ErrorView {
-                    path: db_path.display().to_string(),
-                    message: format!("{error:#}"),
-                };
-                gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| view)).map(|_| ())
-            }
-        };
+        let recent = RecentDatabases::load_default();
+        let opened = gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| Shell::new(recent, database, window, cx))
+        });
         if let Err(error) = opened {
             eprintln!("kutilang: cannot open the window: {error:#}");
             cx.quit();

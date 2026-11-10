@@ -11,13 +11,16 @@ automatically.
 ## Running
 
 ```sh
-cargo run --release                         # the default database (see below)
-cargo run --release -- --db path/to/db.sqlite3   # a specific file
+cargo run --release                         # starts on the database picker
+cargo run --release -- --db path/to/db.sqlite3   # opens this file directly
 cargo run --release -- --db path/to/db.sqlite3 --upgrade-only   # upgrade and exit
 ```
 
-The default database is the one the original application used, so an existing
-installation is picked up without any setup:
+The application starts on a list of the recently opened databases, with
+**Open Database…** and **New Database…**; File → Open Database… (Cmd/Ctrl-O)
+or Close Database comes back to it. The list also offers the database the
+original application used, when it exists, so an existing installation is one
+click away:
 
 | OS      | Path                                                   |
 | ------- | ------------------------------------------------------ |
@@ -87,9 +90,20 @@ macOS, Ctrl on Windows and Linux).
   first, grouped by day, each with a one-line summary. Filter by patient name
   and by dates (Hari ini, 7 hari terakhir, 30 hari terakhir, Bulan ini, Tahun
   ini, or any range). **Open Patient** jumps to the patient.
-* **Settings** (Cmd/Ctrl-,): the template new entries start from, edited in
-  Markdown with a live preview; **Reset to Default** brings back the original
-  template. Also shows which database file is open.
+* **Settings** (Cmd/Ctrl-,): backup, restore and export; the template new
+  entries start from, edited in Markdown with a live preview (**Reset to
+  Default** brings back the original template); which database file is open.
+* **Back Up…** (File menu or Settings): saves a copy of everything (patients,
+  visits, settings) to a file of your choice. It is an ordinary SQLite file.
+* **Restore…**: replaces everything with a backup, after showing how many
+  patients and visits it holds. The current data is first saved next to the
+  database as `<name>.before-restore-<date>.sqlite3`. A database of the original
+  Go application can be restored too (it is upgraded on the way; the chosen file
+  itself is never modified).
+* **Export to Excel…**: writes an `.xlsx` workbook with a *Pasien* sheet
+  (name, head of family, birth date, age, address, last visit, number of
+  visits) and a *Kunjungan* sheet (date, patient, and the full diagnosis as
+  text), with real date cells, frozen headers and filters.
 
 Differences from the original application:
 

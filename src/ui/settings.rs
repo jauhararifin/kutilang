@@ -1,10 +1,12 @@
-//! The Settings section: the template of new entries, and database details.
+//! The Settings section: the template of new entries, backups and export,
+//! and database details.
 
-use std::path::PathBuf;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants as _};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -15,11 +17,20 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, px};
+use gpui_kit::{
+    Context, Entity, EventEmitter, FontWeight, PathPromptOptions, Subscription, Window, div, px,
+};
 
+use crate::dates;
 use crate::diagnosis::{self, TEMPLATE};
-use crate::store::{SCHEMA_VERSION, Store};
+use crate::export;
+use crate::store::{Backup, SCHEMA_VERSION, Store, timestamped_path};
 use crate::ui::widgets;
+
+pub enum SettingsEvent {
+    /// Every record was replaced by a backup.
+    DataReplaced,
+}
 
 pub struct SettingsView {
     store: Rc<Store>,
@@ -28,6 +39,15 @@ pub struct SettingsView {
     /// The template as stored.
     saved: String,
     _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<SettingsEvent> for SettingsView {}
+
+/// Where save dialogs start: the Documents folder, or the database's.
+fn default_folder(db_path: &Path) -> PathBuf {
+    dirs::document_dir()
+        .or_else(|| db_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 impl SettingsView {
@@ -177,6 +197,191 @@ impl SettingsView {
             )
     }
 
+    // Backup, restore, export -------------------------------------------
+
+    /// Asks where to save a backup, then writes it.
+    pub fn back_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = format!("kutilang-backup-{}.sqlite3", dates::to_stored(dates::today()));
+        let chosen = cx.prompt_for_new_path(&default_folder(&self.db_path), Some(&name));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = chosen.await else {
+                return;
+            };
+            this.update_in(cx, |this, window, cx| match this.store.backup_to(&path) {
+                Ok(()) => window.push_notification(
+                    Notification::success(format!("Backup saved as {}.", path.display())),
+                    cx,
+                ),
+                Err(error) => window.push_notification(Notification::error(format!("{error:#}")), cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Asks for a backup, shows what it holds, and restores it once confirmed.
+    pub fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Restore".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = chosen.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            this.update_in(cx, |this, window, cx| this.confirm_restore(&path, window, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    pub fn confirm_restore(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let backup = match Store::open_backup(path) {
+            Ok(backup) => backup,
+            Err(error) => {
+                window.push_notification(Notification::error(format!("{error:#}")), cx);
+                return;
+            }
+        };
+        let description = format!(
+            "Every patient and visit now in Kutilang will be replaced by the {} patients \
+             and {} visits of {}. A copy of the current data is saved first.",
+            widgets::format_count(backup.patients),
+            widgets::format_count(backup.visits),
+            path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+        );
+        // The dialog's builder can run more than once; the backup is used once.
+        let backup = Rc::new(RefCell::new(Some(backup)));
+        let this = cx.weak_entity();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (this, backup) = (this.clone(), backup.clone());
+            alert
+                .title("Restore this backup?")
+                .description(description.clone())
+                .show_cancel(true)
+                .ok_text("Restore")
+                .ok_variant(ButtonVariant::Danger)
+                .on_ok(move |_, window, cx| {
+                    if let Some(backup) = backup.borrow_mut().take() {
+                        this.update(cx, |this, cx| this.apply_restore(backup, window, cx)).ok();
+                    }
+                    true
+                })
+        });
+    }
+
+    /// Restores an opened backup, saving the current data first.
+    pub fn apply_restore(&mut self, backup: Backup, window: &mut Window, cx: &mut Context<Self>) {
+        let previous = timestamped_path(&self.db_path, "before-restore");
+        if let Err(error) = self.store.backup_to(&previous) {
+            window.push_notification(
+                Notification::error(format!(
+                    "Nothing was restored: cannot save a copy of the current data first ({error:#})."
+                )),
+                cx,
+            );
+            return;
+        }
+        match self.store.restore(&backup) {
+            Ok(()) => {
+                self.saved = self.store.diagnosis_template();
+                let saved = self.saved.clone();
+                self.set_text(&saved, window, cx);
+                window.push_notification(
+                    Notification::success(format!(
+                        "Restored {} patients and {} visits. The previous data was saved as {}.",
+                        widgets::format_count(backup.patients),
+                        widgets::format_count(backup.visits),
+                        previous.display()
+                    ))
+                    .autohide(false),
+                    cx,
+                );
+                cx.emit(SettingsEvent::DataReplaced);
+            }
+            Err(error) => window.push_notification(
+                Notification::error(format!("Cannot restore: {error:#}")),
+                cx,
+            ),
+        }
+        cx.notify();
+    }
+
+    /// Asks where to save the spreadsheet, then writes it.
+    pub fn export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = format!("kutilang-{}.xlsx", dates::to_stored(dates::today()));
+        let chosen = cx.prompt_for_new_path(&default_folder(&self.db_path), Some(&name));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = chosen.await else {
+                return;
+            };
+            this.update_in(cx, |this, window, cx| {
+                match export::export_xlsx(&this.store, &path) {
+                    Ok(report) => window.push_notification(
+                        Notification::success(format!(
+                            "Exported {} patients and {} visits to {}.",
+                            widgets::format_count(report.patients),
+                            widgets::format_count(report.visits),
+                            path.display()
+                        )),
+                        cx,
+                    ),
+                    Err(error) => window.push_notification(
+                        Notification::error(format!("Cannot export: {error:#}")),
+                        cx,
+                    ),
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn render_data(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let row = |button: Button, text: &'static str, cx: &Context<Self>| {
+            h_flex()
+                .w_full()
+                .gap_4()
+                .child(div().w(px(190.)).flex_none().child(button))
+                .child(widgets::muted(text, cx).text_sm())
+        };
+        GroupBox::new().fill().title("Backup & Export").child(
+            v_flex()
+                .w_full()
+                .gap_3()
+                .child(row(
+                    Button::new("back-up")
+                        .small()
+                        .label("Back Up…")
+                        .on_click(cx.listener(|this, _, window, cx| this.back_up(window, cx))),
+                    "Save a copy of every patient, visit and setting to a file of your choice.",
+                    cx,
+                ))
+                .child(row(
+                    Button::new("restore")
+                        .small()
+                        .label("Restore…")
+                        .on_click(cx.listener(|this, _, window, cx| this.restore(window, cx))),
+                    "Replace everything with a backup (also a database of the old application). \
+                     The current data is saved next to the database first.",
+                    cx,
+                ))
+                .child(row(
+                    Button::new("export")
+                        .small()
+                        .label("Export to Excel…")
+                        .on_click(cx.listener(|this, _, window, cx| this.export(window, cx))),
+                    "Write all patients and visits to an Excel workbook (.xlsx), one sheet each.",
+                    cx,
+                )),
+        )
+    }
+
     fn render_database(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let count = |result: anyhow::Result<usize>| {
             result.map(widgets::format_count).unwrap_or_else(|_| "-".into())
@@ -208,6 +413,7 @@ impl Render for SettingsView {
                     .px_6()
                     .py_5()
                     .child(div().text_xl().font_weight(FontWeight::SEMIBOLD).child("Settings"))
+                    .child(self.render_data(cx))
                     .child(self.render_template(cx))
                     .child(self.render_database(cx)),
             )

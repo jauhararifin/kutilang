@@ -3,8 +3,10 @@
 
 pub mod dates;
 pub mod diagnosis;
+pub mod export;
 pub mod keywords;
 pub mod model;
 pub mod print;
+pub mod recent;
 pub mod store;
 pub mod ui;
