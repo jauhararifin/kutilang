@@ -14,7 +14,10 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 enum Block {
     Paragraph(String),
     Heading(usize, String),
-    List { ordered: bool, items: Vec<Vec<Block>> },
+    List {
+        ordered: bool,
+        items: Vec<Vec<Block>>,
+    },
     Quote(Vec<Block>),
     Code(String),
     Rule,
@@ -532,7 +535,11 @@ impl Inline {
         } else {
             href.to_string()
         };
-        let label = if label.is_empty() { href.to_string() } else { label };
+        let label = if label.is_empty() {
+            href.to_string()
+        } else {
+            label
+        };
         self.text_markdown(&format!("[{label}]({url})"));
     }
 
@@ -584,7 +591,10 @@ mod tests {
 
     #[test]
     fn nbsp_and_whitespace_collapse() {
-        assert_eq!(md("<p>&nbsp;TD:&nbsp;&nbsp;120/80 \n mmHg&nbsp;</p>"), "TD: 120/80 mmHg");
+        assert_eq!(
+            md("<p>&nbsp;TD:&nbsp;&nbsp;120/80 \n mmHg&nbsp;</p>"),
+            "TD: 120/80 mmHg"
+        );
         assert_eq!(md("<p></p><p>&nbsp;</p><p>x</p>"), "x");
     }
 
@@ -607,7 +617,10 @@ mod tests {
 
     #[test]
     fn adjacent_emphasis_is_merged() {
-        assert_eq!(md("<p><strong>K</strong><strong>U</strong>:</p>"), "**KU**:");
+        assert_eq!(
+            md("<p><strong>K</strong><strong>U</strong>:</p>"),
+            "**KU**:"
+        );
         assert_eq!(md("<p><strong></strong>x</p>"), "x");
     }
 
@@ -621,14 +634,26 @@ mod tests {
 
     #[test]
     fn markdown_syntax_in_text_is_escaped() {
-        assert_eq!(md("<p>2*3 = 6_ok [x] ~2 hari $5</p>"), "2\\*3 = 6\\_ok \\[x\\] \\~2 hari \\$5");
-        assert_eq!(md("<p>&lt;br&gt; &lt; 5 a&amp;b &amp;amp;</p>"), "\\<br> < 5 a&b \\&amp;");
-        assert_eq!(md("<p># 1</p><p>- x</p><p>3. obat</p><p>--</p>"), "\\# 1\n\n\\- x\n\n3\\. obat\n\n\\--");
+        assert_eq!(
+            md("<p>2*3 = 6_ok [x] ~2 hari $5</p>"),
+            "2\\*3 = 6\\_ok \\[x\\] \\~2 hari \\$5"
+        );
+        assert_eq!(
+            md("<p>&lt;br&gt; &lt; 5 a&amp;b &amp;amp;</p>"),
+            "\\<br> < 5 a&b \\&amp;"
+        );
+        assert_eq!(
+            md("<p># 1</p><p>- x</p><p>3. obat</p><p>--</p>"),
+            "\\# 1\n\n\\- x\n\n3\\. obat\n\n\\--"
+        );
     }
 
     #[test]
     fn nested_lists_from_draft_js() {
-        assert_eq!(md("<ol><li>a</li><ol><li>b</li></ol><li>c</li></ol>"), "1. a\n   1. b\n2. c");
+        assert_eq!(
+            md("<ol><li>a</li><ol><li>b</li></ol><li>c</li></ol>"),
+            "1. a\n   1. b\n2. c"
+        );
         assert_eq!(md("<ul><li>a<ul><li>b</li></ul></li></ul>"), "- a\n  - b");
     }
 
@@ -642,7 +667,10 @@ mod tests {
 
     #[test]
     fn underline_and_sub_keep_text() {
-        assert_eq!(md("<p><em><ins>catatan</ins></em> H<sub>2</sub>O</p>"), "*catatan* H2O");
+        assert_eq!(
+            md("<p><em><ins>catatan</ins></em> H<sub>2</sub>O</p>"),
+            "*catatan* H2O"
+        );
     }
 
     #[test]

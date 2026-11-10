@@ -17,6 +17,7 @@ use gpui_kit::{Context, Entity, EventEmitter, SharedString, Window, div, px};
 
 use crate::dates;
 use crate::diagnosis;
+use crate::i18n::t;
 use crate::model::{DiagnosisFormat, Visit};
 use crate::ui::widgets;
 
@@ -47,7 +48,15 @@ impl EventEmitter<VisitEditorEvent> for VisitEditor {}
 impl VisitEditor {
     /// An editor for a new entry, starting from `template`.
     pub fn new_entry(template: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build("new-entry".into(), dates::today(), template, false, false, window, cx)
+        Self::build(
+            "new-entry".into(),
+            dates::today(),
+            template,
+            false,
+            false,
+            window,
+            cx,
+        )
     }
 
     /// An editor for an existing visit.
@@ -55,7 +64,15 @@ impl VisitEditor {
         let date = dates::parse_stored(&visit.date).unwrap_or_else(dates::today);
         let text = diagnosis::editable_markdown(&visit.diagnosis, visit.format);
         let from_html = visit.format == DiagnosisFormat::Html;
-        Self::build(format!("edit-{}", visit.id).into(), date, text, true, from_html, window, cx)
+        Self::build(
+            format!("edit-{}", visit.id).into(),
+            date,
+            text,
+            true,
+            from_html,
+            window,
+            cx,
+        )
     }
 
     fn build(
@@ -103,12 +120,21 @@ impl VisitEditor {
 
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Date::Single(Some(date)) = self.date.read(cx).date() else {
-            window.push_notification(Notification::error("Please choose the date of the visit"), cx);
+            window.push_notification(
+                Notification::error(t(
+                    "Pilih tanggal kunjungan",
+                    "Please choose the date of the visit",
+                )),
+                cx,
+            );
             return;
         };
         let text = self.text(cx);
         if text.trim().is_empty() {
-            window.push_notification(Notification::error("Missing diagnosis"), cx);
+            window.push_notification(
+                Notification::error(t("Diagnosis belum diisi", "Missing diagnosis")),
+                cx,
+            );
             return;
         }
         let diagnosis = (!self.existing || text != self.initial_text).then_some(text);
@@ -170,14 +196,17 @@ impl Render for VisitEditor {
                     .icon(IconName::Bold)
                     .ghost()
                     .small()
-                    .tooltip("Bold (wraps the selection in **)")
+                    .tooltip(t(
+                        "Tebal (mengapit pilihan dengan **)",
+                        "Bold (wraps the selection in **)",
+                    ))
                     .disabled(self.preview)
                     .on_click(cx.listener(|this, _, window, cx| this.bold(window, cx))),
             )
             .child(
                 Button::new("preview")
                     .icon(IconName::Eye)
-                    .label("Preview")
+                    .label(t("Pratinjau", "Preview"))
                     .ghost()
                     .small()
                     .selected(self.preview)
@@ -186,8 +215,12 @@ impl Render for VisitEditor {
 
         let note = self.from_html.then(|| {
             widgets::muted(
-                "Written with the old editor and shown here converted. \
-                 The original is kept unless you change the text.",
+                t(
+                    "Ditulis dengan editor lama dan ditampilkan di sini setelah dikonversi. \
+                     Aslinya tetap disimpan kecuali teksnya diubah.",
+                    "Written with the old editor and shown here converted. \
+                     The original is kept unless you change the text.",
+                ),
                 cx,
             )
             .text_sm()
@@ -208,14 +241,14 @@ impl Render for VisitEditor {
                         Button::new("visit-cancel")
                             .ghost()
                             .small()
-                            .label("Cancel")
+                            .label(t("Batal", "Cancel"))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(VisitEditorEvent::Cancel))),
                     )
                     .child(
                         Button::new("visit-save")
                             .primary()
                             .small()
-                            .label("Save")
+                            .label(t("Simpan", "Save"))
                             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                     ),
             )

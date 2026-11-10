@@ -73,8 +73,9 @@ fn every_old_entry_converts_without_losing_text_or_bold() {
     let mut failures = Vec::new();
     for (id, html) in &rows {
         let markdown = html_to_markdown(html);
-        let rendered = markdown::to_html_with_options(&with_line_breaks(&markdown), &markdown::Options::gfm())
-            .unwrap();
+        let rendered =
+            markdown::to_html_with_options(&with_line_breaks(&markdown), &markdown::Options::gfm())
+                .unwrap();
         let (text, bold) = text_and_bold(html);
         let (new_text, new_bold) = text_and_bold(&rendered);
         if text != new_text || bold != new_bold {
@@ -82,5 +83,9 @@ fn every_old_entry_converts_without_losing_text_or_bold() {
         }
     }
     println!("checked {} entries, {} differ", rows.len(), failures.len());
-    assert!(failures.is_empty(), "entries that differ: {:?}", &failures[..failures.len().min(20)]);
+    assert!(
+        failures.is_empty(),
+        "entries that differ: {:?}",
+        &failures[..failures.len().min(20)]
+    );
 }

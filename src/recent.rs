@@ -88,7 +88,13 @@ impl RecentDatabases {
         let text: String = self
             .entries
             .iter()
-            .map(|entry| format!("{}\t{}\n", entry.opened_at.to_rfc3339(), entry.path.display()))
+            .map(|entry| {
+                format!(
+                    "{}\t{}\n",
+                    entry.opened_at.to_rfc3339(),
+                    entry.path.display()
+                )
+            })
             .collect();
         std::fs::write(&self.file, text)?;
         Ok(())
@@ -137,7 +143,9 @@ mod tests {
         let file = dir.path().join("recent.txt");
         let mut recent = RecentDatabases::load(file.clone());
         for i in 0..15 {
-            recent.add(&dir.path().join(format!("{i}.sqlite3"))).unwrap();
+            recent
+                .add(&dir.path().join(format!("{i}.sqlite3")))
+                .unwrap();
         }
         let mut text = std::fs::read_to_string(&file).unwrap();
         text.insert_str(0, "not a line\nyesterday\t/x.sqlite3\n");

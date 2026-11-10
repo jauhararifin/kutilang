@@ -6,7 +6,9 @@ use chrono::{Datelike as _, Days, NaiveDate};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset};
+use gpui_kit::component::date_picker::{
+    DatePicker, DatePickerEvent, DatePickerState, DateRangePreset,
+};
 use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -21,6 +23,7 @@ use gpui_kit::{
 };
 
 use crate::dates;
+use crate::i18n::{pick, t};
 use crate::model::{Patient, Visit, VisitSummary};
 use crate::print;
 use crate::store::Store;
@@ -50,7 +53,10 @@ pub struct VisitList {
 
 impl VisitList {
     fn reload(&mut self) {
-        match self.store.list_visit_summaries(&self.query, self.from, self.to) {
+        match self
+            .store
+            .list_visit_summaries(&self.query, self.from, self.to)
+        {
             Ok(visits) => {
                 self.total = visits.len();
                 self.days.clear();
@@ -151,15 +157,29 @@ impl ListDelegate for VisitList {
         let name = if visit.head_family_name.trim().is_empty() {
             visit.patient_name.clone()
         } else {
-            format!("{} (KK {})", visit.patient_name, visit.head_family_name.trim())
+            format!(
+                "{} (KK {})",
+                visit.patient_name,
+                visit.head_family_name.trim()
+            )
         };
-        let summary = if visit.summary.is_empty() { " ".to_string() } else { visit.summary.clone() };
+        let summary = if visit.summary.is_empty() {
+            " ".to_string()
+        } else {
+            visit.summary.clone()
+        };
         Some(
             ListItem::new(SharedString::from(format!("visit-{}", visit.id))).child(
                 v_flex()
                     .w_full()
                     .min_w(px(0.))
-                    .child(div().w_full().truncate().font_weight(FontWeight::MEDIUM).child(name))
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(name),
+                    )
                     .child(
                         div()
                             .w_full()
@@ -172,12 +192,35 @@ impl ListDelegate for VisitList {
         )
     }
 
-    fn set_selected_index(&mut self, _: Option<IndexPath>, _: &mut Window, _: &mut Context<ListState<Self>>) {}
+    fn set_selected_index(
+        &mut self,
+        _: Option<IndexPath>,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) {
+    }
 
-    fn render_empty(&mut self, _: &mut Window, cx: &mut Context<ListState<Self>>) -> impl IntoElement {
+    fn render_empty(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> impl IntoElement {
         let (title, hint) = match &self.error {
-            Some(error) => ("Cannot list the visits", error.clone()),
-            None => ("No visits", "Nothing matches the name and dates.".to_string()),
+            Some(error) => (
+                t(
+                    "Kunjungan tidak dapat ditampilkan",
+                    "Cannot list the visits",
+                ),
+                error.clone(),
+            ),
+            None => (
+                t("Tidak ada kunjungan", "No visits"),
+                t(
+                    "Tidak ada yang cocok dengan nama dan tanggal.",
+                    "Nothing matches the name and dates.",
+                )
+                .to_string(),
+            ),
         };
         widgets::empty_state(IconName::Calendar, title, hint, cx)
     }
@@ -316,9 +359,13 @@ impl VisitsView {
         };
         match print::write_visit_page(&selected.patient, &selected.visit) {
             Ok(path) => cx.open_url(&print::file_url(&path)),
-            Err(error) => {
-                window.push_notification(Notification::error(format!("Cannot print: {error}")), cx)
-            }
+            Err(error) => window.push_notification(
+                Notification::error(pick(
+                    format!("Gagal mencetak: {error}"),
+                    format!("Cannot print: {error}"),
+                )),
+                cx,
+            ),
         }
     }
 
@@ -329,29 +376,33 @@ impl VisitsView {
         let month_start = today.with_day(1).unwrap_or(today);
         let year_start = today.with_ordinal(1).unwrap_or(today);
         let presets = vec![
-            DateRangePreset::range("Hari ini", today, today),
-            DateRangePreset::range("7 hari terakhir", days_ago(6), today),
-            DateRangePreset::range("30 hari terakhir", days_ago(29), today),
-            DateRangePreset::range("Bulan ini", month_start, today),
-            DateRangePreset::range("Tahun ini", year_start, today),
+            DateRangePreset::range(t("Hari ini", "Today"), today, today),
+            DateRangePreset::range(t("7 hari terakhir", "Last 7 days"), days_ago(6), today),
+            DateRangePreset::range(t("30 hari terakhir", "Last 30 days"), days_ago(29), today),
+            DateRangePreset::range(t("Bulan ini", "This month"), month_start, today),
+            DateRangePreset::range(t("Tahun ini", "This year"), year_start, today),
         ];
         v_flex()
             .size_full()
-            .child(widgets::pane_header("Visits", Some(total), cx))
+            .child(widgets::pane_header(
+                t("Kunjungan", "Visits"),
+                Some(total),
+                cx,
+            ))
             .child(
                 div().w_full().flex_none().px_3().pt_2().child(
                     DatePicker::new(&self.range)
                         .small()
                         .cleanable(true)
-                        .placeholder("All dates")
+                        .placeholder(t("Semua tanggal", "All dates"))
                         .presets(presets),
                 ),
             )
             .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .child(List::new(&self.list).search_placeholder("Filter by patient")),
+                div().flex_1().min_h(px(0.)).child(
+                    List::new(&self.list)
+                        .search_placeholder(t("Saring menurut pasien", "Filter by patient")),
+                ),
             )
     }
 
@@ -359,8 +410,11 @@ impl VisitsView {
         let Some(selected) = &self.selected else {
             return widgets::empty_state(
                 IconName::Calendar,
-                "No visit selected",
-                "Choose a visit from the list.",
+                t("Belum ada kunjungan yang dipilih", "No visit selected"),
+                t(
+                    "Pilih kunjungan dari daftar.",
+                    "Choose a visit from the list.",
+                ),
                 cx,
             );
         };
@@ -368,7 +422,7 @@ impl VisitsView {
         let today = dates::today();
         let mut subtitle = Vec::new();
         if let Some(birth) = dates::parse_stored(&patient.birth_date) {
-            subtitle.push(format!("{} tahun", dates::age_years(birth, today)));
+            subtitle.push(dates::format_age(dates::age_years(birth, today)));
         }
         if !patient.head_family_name.trim().is_empty() {
             subtitle.push(format!("KK {}", patient.head_family_name.trim()));
@@ -414,14 +468,14 @@ impl VisitsView {
                             .ghost()
                             .small()
                             .icon(IconName::Printer)
-                            .tooltip("Print")
+                            .tooltip(t("Cetak", "Print"))
                             .on_click(cx.listener(|this, _, window, cx| this.print(window, cx))),
                     )
                     .child(
                         Button::new("open-patient")
                             .small()
                             .icon(IconName::User)
-                            .label("Open Patient")
+                            .label(t("Buka Pasien", "Open Patient"))
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 cx.emit(VisitsEvent::OpenPatient(patient_id.clone()))
                             })),
@@ -429,17 +483,20 @@ impl VisitsView {
             )
             .child(
                 div()
-                    .id(SharedString::from(format!("visit-scroll-{}", selected.visit.id)))
+                    .id(SharedString::from(format!(
+                        "visit-scroll-{}",
+                        selected.visit.id
+                    )))
                     .flex_1()
                     .min_h(px(0.))
                     .w_full()
                     .overflow_y_scrollbar()
-                    .child(
-                        div()
-                            .px_5()
-                            .py_4()
-                            .child(entry_view("visits", &selected.visit, [], cx)),
-                    ),
+                    .child(div().px_5().py_4().child(entry_view(
+                        "visits",
+                        &selected.visit,
+                        [],
+                        cx,
+                    ))),
             )
             .into_any_element()
     }

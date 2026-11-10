@@ -55,13 +55,19 @@ mod tests {
         assert_eq!(tokenize("Ma'ruf"), ["maruf"]);
         assert_eq!(tokenize("Ma\u{2019}ruf"), ["maruf"]);
         assert_eq!(tokenize("Sumarni, S.Pd"), ["pd", "s", "sumarni"]);
-        assert_eq!(tokenize("Bayi Ny. (Rina)/Joko"), ["bayi", "joko", "ny", "rina"]);
+        assert_eq!(
+            tokenize("Bayi Ny. (Rina)/Joko"),
+            ["bayi", "joko", "ny", "rina"]
+        );
         assert!(tokenize("( ). /").is_empty());
     }
 
     #[test]
     fn deduplicates_name_and_family_name() {
-        assert_eq!(patient_keywords("Joko Santoso", "Santoso"), ["joko", "santoso"]);
+        assert_eq!(
+            patient_keywords("Joko Santoso", "Santoso"),
+            ["joko", "santoso"]
+        );
     }
 
     #[test]

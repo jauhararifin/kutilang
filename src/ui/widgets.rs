@@ -19,7 +19,9 @@ pub fn format_count(count: usize) -> String {
 
 /// Muted secondary text.
 pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {
-    div().text_color(cx.theme().muted_foreground).child(text.into())
+    div()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
 }
 
 /// The header row above a list: a title, a count and actions.
@@ -55,7 +57,11 @@ pub fn empty_state(
         .justify_center()
         .gap_2()
         .text_color(cx.theme().muted_foreground)
-        .child(icon.into().size(px(40.)).text_color(cx.theme().muted_foreground.opacity(0.5)))
+        .child(
+            icon.into()
+                .size(px(40.))
+                .text_color(cx.theme().muted_foreground.opacity(0.5)),
+        )
         .child(div().font_weight(FontWeight::MEDIUM).child(title.into()))
         .child(div().text_sm().child(hint.into()))
         .into_any_element()

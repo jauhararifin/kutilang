@@ -14,11 +14,11 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, Context, EventEmitter, FontWeight, PathPromptOptions, SharedString, Window, div,
-    px,
+    AnyElement, Context, EventEmitter, FontWeight, PathPromptOptions, SharedString, Window, div, px,
 };
 
 use crate::dates;
+use crate::i18n::{pick, t};
 use crate::recent::{self, RecentDatabases};
 use crate::ui::app::BRAND;
 use crate::ui::widgets;
@@ -56,10 +56,10 @@ impl Launcher {
             .iter()
             .map(|entry| Row {
                 path: entry.path.clone(),
-                opened: Some(format!(
-                    "dibuka {}",
-                    dates::format_relative(entry.opened_at.date_naive(), today)
-                )),
+                opened: Some({
+                    let when = dates::format_relative(entry.opened_at.date_naive(), today);
+                    pick(format!("dibuka {when}"), format!("opened {when}"))
+                }),
                 default: false,
             })
             .collect();
@@ -91,7 +91,7 @@ impl Launcher {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Open".into()),
+            prompt: Some(t("Buka", "Open").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = chosen.await else {
@@ -116,10 +116,13 @@ impl Launcher {
                 let exists = std::fs::metadata(&path).is_ok_and(|m| m.len() > 0);
                 if exists {
                     window.push_notification(
-                        Notification::error(format!(
-                            "{} already exists. Choose another name, or open it with Open Database.",
-                            path.display()
-                        )),
+                        Notification::error({
+                            let path = path.display();
+                            pick(
+                                format!("{path} sudah ada. Pilih nama lain, atau buka dengan Buka Database."),
+                                format!("{path} already exists. Choose another name, or open it with Open Database."),
+                            )
+                        }),
                         cx,
                     );
                 } else {
@@ -144,14 +147,23 @@ impl Launcher {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         let note: SharedString = if !exists {
-            "File not found".into()
+            t("Berkas tidak ditemukan", "File not found").into()
         } else if row.default {
-            "Database of the original application".into()
+            t(
+                "Database aplikasi lama",
+                "Database of the original application",
+            )
+            .into()
         } else {
             row.opened.clone().unwrap_or_default().into()
         };
         let theme = cx.theme();
-        let (hover, muted, danger, border) = (theme.list_hover, theme.muted_foreground, theme.danger, theme.border);
+        let (hover, muted, danger, border) = (
+            theme.list_hover,
+            theme.muted_foreground,
+            theme.danger,
+            theme.border,
+        );
         let path = row.path.clone();
         let forget = row.path.clone();
 
@@ -167,7 +179,11 @@ impl Launcher {
                     .hover(move |row| row.bg(hover))
                     .on_click(cx.listener(move |this, _, _, cx| this.open(path.clone(), cx)))
             })
-            .child(Icon::new(IconName::Database).text_color(if exists { theme.primary } else { muted }))
+            .child(Icon::new(IconName::Database).text_color(if exists {
+                theme.primary
+            } else {
+                muted
+            }))
             .child(
                 v_flex()
                     .flex_1()
@@ -194,7 +210,7 @@ impl Launcher {
                         .icon(IconName::Close)
                         .ghost()
                         .xsmall()
-                        .tooltip("Remove from the list")
+                        .tooltip(t("Hapus dari daftar", "Remove from the list"))
                         .on_click(cx.listener(move |this, _, _, cx| this.forget(&forget, cx))),
                 )
             })
@@ -216,7 +232,16 @@ impl Render for Launcher {
                 .px_4()
                 .py_6()
                 .text_center()
-                .child(widgets::muted("No databases opened yet.", cx).text_sm())
+                .child(
+                    widgets::muted(
+                        t(
+                            "Belum ada database yang dibuka.",
+                            "No databases opened yet.",
+                        ),
+                        cx,
+                    )
+                    .text_sm(),
+                )
                 .into_any_element()
         } else {
             v_flex().w_full().children(rows).into_any_element()
@@ -226,56 +251,85 @@ impl Render for Launcher {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(TitleBar::new().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Kutilang")))
             .child(
-                div().id("launcher-scroll").flex_1().min_h(px(0.)).overflow_y_scrollbar().child(
-                    v_flex().w_full().items_center().py_12().child(
-                        v_flex()
-                            .w(px(580.))
-                            .gap_6()
-                            .child(
-                                h_flex()
-                                    .gap_3()
-                                    .child(Icon::new(IconName::Stethoscope).size(px(36.)).text_color(cx.theme().primary))
-                                    .child(
-                                        v_flex()
-                                            .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child("Kutilang"))
-                                            .child(widgets::muted(BRAND, cx)),
-                                    ),
-                            )
-                            .child(
-                                v_flex()
-                                    .gap_2()
-                                    .child(div().font_weight(FontWeight::SEMIBOLD).child("Recent Databases"))
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .border_1()
-                                            .border_color(cx.theme().border)
-                                            .rounded(cx.theme().radius)
-                                            .overflow_hidden()
-                                            .child(list),
-                                    ),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("open-database")
-                                            .primary()
-                                            .icon(IconName::FolderOpen)
-                                            .label("Open Database…")
-                                            .on_click(cx.listener(|this, _, window, cx| this.choose_file(window, cx))),
-                                    )
-                                    .child(
-                                        Button::new("new-database")
-                                            .icon(IconName::Plus)
-                                            .label("New Database…")
-                                            .on_click(cx.listener(|this, _, window, cx| this.new_database(window, cx))),
-                                    ),
-                            ),
-                    ),
+                TitleBar::new().child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Kutilang"),
                 ),
+            )
+            .child(
+                div()
+                    .id("launcher-scroll")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scrollbar()
+                    .child(
+                        v_flex().w_full().items_center().py_12().child(
+                            v_flex()
+                                .w(px(580.))
+                                .gap_6()
+                                .child(
+                                    h_flex()
+                                        .gap_3()
+                                        .child(
+                                            Icon::new(IconName::Stethoscope)
+                                                .size(px(36.))
+                                                .text_color(cx.theme().primary),
+                                        )
+                                        .child(
+                                            v_flex()
+                                                .child(
+                                                    div()
+                                                        .text_2xl()
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .child("Kutilang"),
+                                                )
+                                                .child(widgets::muted(BRAND, cx)),
+                                        ),
+                                )
+                                .child(
+                                    v_flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child(t("Database Terakhir", "Recent Databases")),
+                                        )
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .border_1()
+                                                .border_color(cx.theme().border)
+                                                .rounded(cx.theme().radius)
+                                                .overflow_hidden()
+                                                .child(list),
+                                        ),
+                                )
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("open-database")
+                                                .primary()
+                                                .icon(IconName::FolderOpen)
+                                                .label(t("Buka Database…", "Open Database…"))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.choose_file(window, cx)
+                                                })),
+                                        )
+                                        .child(
+                                            Button::new("new-database")
+                                                .icon(IconName::Plus)
+                                                .label(t("Database Baru…", "New Database…"))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.new_database(window, cx)
+                                                })),
+                                        ),
+                                ),
+                        ),
+                    ),
             )
     }
 }

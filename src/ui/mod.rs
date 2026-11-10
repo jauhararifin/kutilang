@@ -24,15 +24,16 @@ use gpui_kit::{
 
 pub use app::{BRAND, KutilangApp, Section};
 pub use assets::Assets;
+pub use launcher::Launcher;
 pub use patient_detail::PatientDetail;
 pub use patients::{PatientList, PatientsView};
 pub use profile_form::ProfileForm;
-pub use launcher::Launcher;
 pub use settings::{SettingsEvent, SettingsView};
 pub use shell::Shell;
 pub use visit_editor::VisitEditor;
 pub use visits::{VisitList, VisitsView};
 
+use crate::i18n::{self, t};
 use crate::recent::RecentDatabases;
 
 gpui_kit::actions!(
@@ -83,6 +84,7 @@ pub fn init(cx: &mut App) {
     gpui_kit::init(cx);
     // Always light, whatever the system appearance.
     apply_theme(WindowAppearance::Light, cx);
+    i18n::set_language(i18n::load_preference());
     cx.on_action(|_: &Quit, cx| cx.quit());
     // Cmd on macOS, Ctrl elsewhere.
     macro_rules! shortcuts {
@@ -101,27 +103,7 @@ pub fn init(cx: &mut App) {
     cx.bind_keys(shortcuts!("cmd"));
     #[cfg(not(target_os = "macos"))]
     cx.bind_keys(shortcuts!("ctrl"));
-    cx.set_menus([
-        Menu::new("Kutilang").items([
-            MenuItem::action("Settings…", ShowSettings),
-            MenuItem::separator(),
-            MenuItem::action("Quit Kutilang", Quit),
-        ]),
-        Menu::new("File").items([
-            MenuItem::action("Open Database…", OpenDatabase),
-            MenuItem::action("Close Database", CloseDatabase),
-            MenuItem::separator(),
-            MenuItem::action("New Patient…", NewPatient),
-            MenuItem::separator(),
-            MenuItem::action("Back Up…", BackUp),
-            MenuItem::action("Restore…", RestoreBackup),
-            MenuItem::action("Export to Excel…", ExportToExcel),
-        ]),
-        Menu::new("View").items([
-            MenuItem::action("Patients", ShowPatients),
-            MenuItem::action("Visits", ShowVisits),
-        ]),
-    ]);
+    set_menus(cx);
     cx.on_window_closed(|cx, _| {
         if cx.windows().is_empty() {
             cx.quit();
@@ -146,4 +128,29 @@ pub fn run(database: Option<PathBuf>) {
         }
         cx.activate(true);
     });
+}
+
+/// The application menu, in the current language.
+pub fn set_menus(cx: &mut App) {
+    cx.set_menus([
+        Menu::new("Kutilang").items([
+            MenuItem::action(t("Pengaturan…", "Settings…"), ShowSettings),
+            MenuItem::separator(),
+            MenuItem::action(t("Keluar dari Kutilang", "Quit Kutilang"), Quit),
+        ]),
+        Menu::new(t("Berkas", "File")).items([
+            MenuItem::action(t("Buka Database…", "Open Database…"), OpenDatabase),
+            MenuItem::action(t("Tutup Database", "Close Database"), CloseDatabase),
+            MenuItem::separator(),
+            MenuItem::action(t("Pasien Baru…", "New Patient…"), NewPatient),
+            MenuItem::separator(),
+            MenuItem::action(t("Cadangkan…", "Back Up…"), BackUp),
+            MenuItem::action(t("Pulihkan…", "Restore…"), RestoreBackup),
+            MenuItem::action(t("Ekspor ke Excel…", "Export to Excel…"), ExportToExcel),
+        ]),
+        Menu::new(t("Tampilan", "View")).items([
+            MenuItem::action(t("Pasien", "Patients"), ShowPatients),
+            MenuItem::action(t("Kunjungan", "Visits"), ShowVisits),
+        ]),
+    ]);
 }

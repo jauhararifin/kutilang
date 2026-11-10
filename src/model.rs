@@ -3,6 +3,7 @@
 use chrono::NaiveDate;
 
 use crate::dates;
+use crate::i18n::t;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Patient {
@@ -127,7 +128,12 @@ impl PatientErrors {
 }
 
 fn check_length(value: &str, max: usize) -> Option<String> {
-    (value.chars().count() > max).then(|| format!("Maximum at {max} characters"))
+    (value.chars().count() > max).then(|| {
+        crate::i18n::pick(
+            format!("Maksimal {max} karakter"),
+            format!("Maximum at {max} characters"),
+        )
+    })
 }
 
 impl PatientInput {
@@ -139,14 +145,14 @@ impl PatientInput {
 
         let mut errors = PatientErrors {
             name: if name.is_empty() {
-                Some("Required".into())
+                Some(t("Wajib diisi", "Required").into())
             } else {
                 check_length(name, 255)
             },
             head_family_name: check_length(head_family_name, 255),
             birth_date: None,
             address: if address.is_empty() {
-                Some("Required".into())
+                Some(t("Wajib diisi", "Required").into())
             } else {
                 check_length(address, 4096)
             },
@@ -154,7 +160,13 @@ impl PatientInput {
 
         let birth_date = match dates::parse_user_date(&self.birth_date) {
             Ok(date) if date > today => {
-                errors.birth_date = Some("Birthdate is in the future".into());
+                errors.birth_date = Some(
+                    t(
+                        "Tanggal lahir ada di masa depan",
+                        "Birthdate is in the future",
+                    )
+                    .into(),
+                );
                 None
             }
             Ok(date) => Some(date),
@@ -195,7 +207,10 @@ mod tests {
         let profile = input.validate(today()).unwrap();
         assert_eq!(profile.name, "Siti  Aminah");
         assert_eq!(profile.head_family_name, "Joko");
-        assert_eq!(profile.birth_date, NaiveDate::from_ymd_opt(1990, 1, 5).unwrap());
+        assert_eq!(
+            profile.birth_date,
+            NaiveDate::from_ymd_opt(1990, 1, 5).unwrap()
+        );
         assert_eq!(profile.address, "Jl. Mawar 1");
     }
 
@@ -208,10 +223,13 @@ mod tests {
             address: "".into(),
         };
         let errors = input.validate(today()).unwrap_err();
-        assert_eq!(errors.name.as_deref(), Some("Required"));
+        assert_eq!(errors.name.as_deref(), Some("Wajib diisi"));
         assert!(errors.head_family_name.is_some());
-        assert_eq!(errors.birth_date.as_deref(), Some("Birthdate is in the future"));
-        assert_eq!(errors.address.as_deref(), Some("Required"));
+        assert_eq!(
+            errors.birth_date.as_deref(),
+            Some("Tanggal lahir ada di masa depan")
+        );
+        assert_eq!(errors.address.as_deref(), Some("Wajib diisi"));
     }
 
     #[test]

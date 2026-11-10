@@ -1,5 +1,8 @@
 // No console window for the released Windows application.
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -81,8 +84,14 @@ fn main() -> ExitCode {
                         println!("Upgraded {}", db_path.display());
                         println!("  patients: {}", report.patients);
                         println!("  visits: {}", report.visits);
-                        println!("  visits without a patient (left out): {}", report.orphan_visits);
-                        println!("  corrected last visit dates: {}", report.corrected_last_visits);
+                        println!(
+                            "  visits without a patient (left out): {}",
+                            report.orphan_visits
+                        );
+                        println!(
+                            "  corrected last visit dates: {}",
+                            report.corrected_last_visits
+                        );
                         if let Some(backup) = report.backup_path {
                             println!("  backup of the original: {}", backup.display());
                         }

@@ -8,6 +8,7 @@ use rust_xlsxwriter::{ExcelDateTime, Format, FormatAlign, Workbook, Worksheet};
 
 use crate::dates;
 use crate::diagnosis;
+use crate::i18n::t;
 use crate::store::Store;
 
 /// The most text an Excel cell can hold.
@@ -28,7 +29,13 @@ struct Formats {
 
 /// A stored `YYYY-MM-DD` date as an Excel date, or as text when Excel
 /// cannot represent it (before 1900, or not a date).
-fn write_date(sheet: &mut Worksheet, row: u32, col: u16, value: &str, formats: &Formats) -> Result<()> {
+fn write_date(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    value: &str,
+    formats: &Formats,
+) -> Result<()> {
     let date = dates::parse_stored(value).and_then(|d| {
         ExcelDateTime::from_ymd(d.year().try_into().ok()?, d.month() as u8, d.day() as u8).ok()
     });
@@ -61,23 +68,25 @@ pub fn export_xlsx(store: &Store, path: &Path) -> Result<ExportReport> {
     let today = dates::today();
     let formats = Formats {
         header: Format::new().set_bold().set_background_color(0xE7E6E6),
-        date: Format::new().set_num_format("dd/mm/yyyy").set_align(FormatAlign::Top),
+        date: Format::new()
+            .set_num_format("dd/mm/yyyy")
+            .set_align(FormatAlign::Top),
         wrap: Format::new().set_text_wrap().set_align(FormatAlign::Top),
     };
     let mut workbook = Workbook::new();
 
     let patients = store.export_patients()?;
     let sheet = workbook.add_worksheet();
-    sheet.set_name("Pasien")?;
+    sheet.set_name(t("Pasien", "Patients"))?;
     let columns = [
-        ("Nama", 28.0),
-        ("Nama KK", 24.0),
-        ("Tanggal Lahir", 14.0),
-        ("Umur", 7.0),
-        ("Alamat", 40.0),
-        ("Kunjungan Terakhir", 18.0),
-        ("Jumlah Kunjungan", 17.0),
-        ("ID Pasien", 34.0),
+        (t("Nama", "Name"), 28.0),
+        (t("Nama KK", "Head of Family"), 24.0),
+        (t("Tanggal Lahir", "Date of Birth"), 14.0),
+        (t("Umur", "Age"), 7.0),
+        (t("Alamat", "Address"), 40.0),
+        (t("Kunjungan Terakhir", "Last Visit"), 18.0),
+        (t("Jumlah Kunjungan", "Visits"), 17.0),
+        (t("ID Pasien", "Patient ID"), 34.0),
     ];
     header(sheet, &columns, &formats)?;
     for (i, patient) in patients.iter().enumerate() {
@@ -97,14 +106,14 @@ pub fn export_xlsx(store: &Store, path: &Path) -> Result<ExportReport> {
 
     let visits = store.export_visits()?;
     let sheet = workbook.add_worksheet();
-    sheet.set_name("Kunjungan")?;
+    sheet.set_name(t("Kunjungan", "Visits"))?;
     let columns = [
-        ("Tanggal", 12.0),
-        ("Nama", 28.0),
-        ("Nama KK", 24.0),
-        ("Diagnosis", 90.0),
-        ("ID Pasien", 34.0),
-        ("ID Kunjungan", 34.0),
+        (t("Tanggal", "Date"), 12.0),
+        (t("Nama", "Name"), 28.0),
+        (t("Nama KK", "Head of Family"), 24.0),
+        (t("Diagnosis", "Diagnosis"), 90.0),
+        (t("ID Pasien", "Patient ID"), 34.0),
+        (t("ID Kunjungan", "Visit ID"), 34.0),
     ];
     header(sheet, &columns, &formats)?;
     for (i, visit) in visits.iter().enumerate() {

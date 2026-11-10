@@ -25,6 +25,7 @@ use gpui_kit::{
 
 use crate::dates;
 use crate::diagnosis;
+use crate::i18n::{pick, t};
 use crate::model::{Cursor, Patient, PatientProfile, Visit};
 use crate::print;
 use crate::store::Store;
@@ -82,7 +83,10 @@ impl PatientVisitList {
         let Some(cursor) = self.next.take() else {
             return;
         };
-        match self.store.list_visits(&self.patient_id, Some(&cursor), PAGE_SIZE) {
+        match self
+            .store
+            .list_visits(&self.patient_id, Some(&cursor), PAGE_SIZE)
+        {
             Ok(page) => {
                 self.rows.extend(Self::rows_from(page.items));
                 self.next = page.next;
@@ -99,7 +103,10 @@ impl PatientVisitList {
     }
 
     fn visit(&self, id: &str) -> Option<&Visit> {
-        self.rows.iter().map(|row| &row.visit).find(|visit| visit.id == id)
+        self.rows
+            .iter()
+            .map(|row| &row.visit)
+            .find(|visit| visit.id == id)
     }
 }
 
@@ -119,13 +126,24 @@ impl ListDelegate for PatientVisitList {
         let row = self.rows.get(ix.row)?;
         let today = dates::today();
         let (date, relative) = match dates::parse_stored(&row.visit.date) {
-            Some(date) => (dates::format_short(date), dates::format_relative(date, today)),
+            Some(date) => (
+                dates::format_short(date),
+                dates::format_relative(date, today),
+            ),
             None => (row.visit.date.clone(), String::new()),
         };
         let muted = cx.theme().muted_foreground;
-        let summary = if row.summary.is_empty() { " ".to_string() } else { row.summary.clone() };
+        let summary = if row.summary.is_empty() {
+            " ".to_string()
+        } else {
+            row.summary.clone()
+        };
         Some(
-            ListItem::new(SharedString::from(format!("patient-visit-{}", row.visit.id))).child(
+            ListItem::new(SharedString::from(format!(
+                "patient-visit-{}",
+                row.visit.id
+            )))
+            .child(
                 v_flex()
                     .w_full()
                     .min_w(px(0.))
@@ -133,15 +151,41 @@ impl ListDelegate for PatientVisitList {
                         h_flex()
                             .w_full()
                             .gap_2()
-                            .child(div().flex_none().font_weight(FontWeight::MEDIUM).child(date))
-                            .child(div().flex_1().min_w(px(0.)).truncate().text_xs().text_color(muted).child(relative)),
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(date),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(relative),
+                            ),
                     )
-                    .child(div().w_full().truncate().text_xs().text_color(muted).child(summary)),
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(summary),
+                    ),
             ),
         )
     }
 
-    fn set_selected_index(&mut self, _: Option<IndexPath>, _: &mut Window, _: &mut Context<ListState<Self>>) {}
+    fn set_selected_index(
+        &mut self,
+        _: Option<IndexPath>,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) {
+    }
 
     fn has_more(&self, _: &App) -> bool {
         self.next.is_some()
@@ -156,15 +200,37 @@ impl ListDelegate for PatientVisitList {
         cx.notify();
     }
 
-    fn render_empty(&mut self, _: &mut Window, cx: &mut Context<ListState<Self>>) -> impl IntoElement {
+    fn render_empty(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> impl IntoElement {
         let (title, hint) = match &self.error {
-            Some(error) => ("Cannot list the visits", error.clone()),
-            None => ("No visits yet", "Write the first one with New Entry.".to_string()),
+            Some(error) => (
+                t(
+                    "Kunjungan tidak dapat ditampilkan",
+                    "Cannot list the visits",
+                ),
+                error.clone(),
+            ),
+            None => (
+                t("Belum ada kunjungan", "No visits yet"),
+                t(
+                    "Tulis yang pertama dengan Kunjungan Baru.",
+                    "Write the first one with New Visit.",
+                )
+                .to_string(),
+            ),
         };
         widgets::empty_state(IconName::Calendar, title, hint, cx)
     }
 
-    fn perform_search(&mut self, _: &str, _: &mut Window, _: &mut Context<ListState<Self>>) -> Task<()> {
+    fn perform_search(
+        &mut self,
+        _: &str,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) -> Task<()> {
         Task::ready(())
     }
 }
@@ -188,7 +254,12 @@ pub struct PatientDetail {
 impl EventEmitter<PatientDetailEvent> for PatientDetail {}
 
 impl PatientDetail {
-    pub fn new(store: Rc<Store>, patient_id: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        store: Rc<Store>,
+        patient_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut delegate = PatientVisitList {
             store: store.clone(),
             patient_id: patient_id.clone(),
@@ -205,15 +276,25 @@ impl PatientDetail {
             }
             list
         });
-        let subscription = cx.subscribe_in(&visits, window, |this, visits, event, window, cx| match event {
-            ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
-                let id = visits.read(cx).delegate().rows.get(ix.row).map(|r| r.visit.id.clone());
-                if let Some(id) = id {
-                    this.select_visit(&id, window, cx);
-                }
-            }
-            ListEvent::Cancel => {}
-        });
+        let subscription =
+            cx.subscribe_in(
+                &visits,
+                window,
+                |this, visits, event, window, cx| match event {
+                    ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
+                        let id = visits
+                            .read(cx)
+                            .delegate()
+                            .rows
+                            .get(ix.row)
+                            .map(|r| r.visit.id.clone());
+                        if let Some(id) = id {
+                            this.select_visit(&id, window, cx);
+                        }
+                    }
+                    ListEvent::Cancel => {}
+                },
+            );
 
         let mut detail = Self {
             store,
@@ -237,7 +318,13 @@ impl PatientDetail {
 
     /// Ids of the visits loaded in the list, newest first.
     pub fn entry_ids(&self, cx: &App) -> Vec<String> {
-        self.visits.read(cx).delegate().rows.iter().map(|r| r.visit.id.clone()).collect()
+        self.visits
+            .read(cx)
+            .delegate()
+            .rows
+            .iter()
+            .map(|r| r.visit.id.clone())
+            .collect()
     }
 
     /// The visit shown on the right.
@@ -267,7 +354,10 @@ impl PatientDetail {
             Ok(patient) => self.patient = patient,
             Err(error) => Self::notify_error(window, error, cx),
         }
-        self.visit_count = self.store.count_patient_visits(&self.patient_id).unwrap_or(0);
+        self.visit_count = self
+            .store
+            .count_patient_visits(&self.patient_id)
+            .unwrap_or(0);
         cx.notify();
     }
 
@@ -294,7 +384,11 @@ impl PatientDetail {
     /// Shows a visit on the right, closing the editors.
     pub fn select_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.composer = None;
-        if self.editor.as_ref().is_some_and(|(editing, _, _)| editing != id) {
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(|(editing, _, _)| editing != id)
+        {
             self.editor = None;
         }
         self.selected = Some(id.to_string());
@@ -314,28 +408,44 @@ impl PatientDetail {
         self.editor = None;
         let template = self.store.diagnosis_template();
         let composer = cx.new(|cx| VisitEditor::new_entry(template, window, cx));
-        let subscription = cx.subscribe_in(&composer, window, |this, _, event, window, cx| match event {
-            VisitEditorEvent::Submit {
-                date,
-                diagnosis: Some(diagnosis),
-            } => this.add_entry(*date, diagnosis, window, cx),
-            VisitEditorEvent::Submit { diagnosis: None, .. } => {}
-            VisitEditorEvent::Cancel => {
-                this.composer = None;
-                cx.notify();
-            }
-        });
+        let subscription =
+            cx.subscribe_in(
+                &composer,
+                window,
+                |this, _, event, window, cx| match event {
+                    VisitEditorEvent::Submit {
+                        date,
+                        diagnosis: Some(diagnosis),
+                    } => this.add_entry(*date, diagnosis, window, cx),
+                    VisitEditorEvent::Submit {
+                        diagnosis: None, ..
+                    } => {}
+                    VisitEditorEvent::Cancel => {
+                        this.composer = None;
+                        cx.notify();
+                    }
+                },
+            );
         composer.update(cx, |composer, cx| composer.focus(window, cx));
         self.composer = Some((composer, subscription));
         cx.notify();
     }
 
-    fn add_entry(&mut self, date: NaiveDate, diagnosis: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn add_entry(
+        &mut self,
+        date: NaiveDate,
+        diagnosis: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match self.store.add_visit(&self.patient_id, date, diagnosis) {
             Ok(visit) => {
                 self.composer = None;
                 self.reload_visits(Some(&visit.id), window, cx);
-                window.push_notification(Notification::success("Visit inserted"), cx);
+                window.push_notification(
+                    Notification::success(t("Kunjungan ditambahkan", "Visit added")),
+                    cx,
+                );
                 cx.emit(PatientDetailEvent::Changed);
             }
             Err(error) => Self::notify_error(window, error, cx),
@@ -352,15 +462,20 @@ impl PatientDetail {
         self.select_visit(id, window, cx);
         let editor = cx.new(|cx| VisitEditor::edit(&visit, window, cx));
         let visit_id = visit.id.clone();
-        let subscription = cx.subscribe_in(&editor, window, move |this, _, event, window, cx| match event {
-            VisitEditorEvent::Submit { date, diagnosis } => {
-                this.update_entry(&visit_id, *date, diagnosis.as_deref(), window, cx)
-            }
-            VisitEditorEvent::Cancel => {
-                this.editor = None;
-                cx.notify();
-            }
-        });
+        let subscription =
+            cx.subscribe_in(
+                &editor,
+                window,
+                move |this, _, event, window, cx| match event {
+                    VisitEditorEvent::Submit { date, diagnosis } => {
+                        this.update_entry(&visit_id, *date, diagnosis.as_deref(), window, cx)
+                    }
+                    VisitEditorEvent::Cancel => {
+                        this.editor = None;
+                        cx.notify();
+                    }
+                },
+            );
         editor.update(cx, |editor, cx| editor.focus(window, cx));
         self.editor = Some((visit.id, editor, subscription));
         cx.notify();
@@ -378,7 +493,10 @@ impl PatientDetail {
             Ok(_) => {
                 self.editor = None;
                 self.reload_visits(Some(id), window, cx);
-                window.push_notification(Notification::success("Visit updated"), cx);
+                window.push_notification(
+                    Notification::success(t("Kunjungan diperbarui", "Visit updated")),
+                    cx,
+                );
                 cx.emit(PatientDetailEvent::Changed);
             }
             Err(error) => Self::notify_error(window, error, cx),
@@ -386,19 +504,28 @@ impl PatientDetail {
         cx.notify();
     }
 
-    pub fn confirm_delete_entry(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn confirm_delete_entry(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let this = cx.weak_entity();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let this = this.clone();
             let id = id.clone();
             alert
-                .title("Delete this entry?")
-                .description("The entry will be removed from the history.")
+                .title(t("Hapus kunjungan ini?", "Delete this visit?"))
+                .description(t(
+                    "Kunjungan akan dihapus dari riwayat.",
+                    "The visit will be removed from the history.",
+                ))
                 .show_cancel(true)
                 .ok_text("Delete")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
-                    this.update(cx, |detail, cx| detail.delete_entry(&id, window, cx)).ok();
+                    this.update(cx, |detail, cx| detail.delete_entry(&id, window, cx))
+                        .ok();
                     true
                 })
         });
@@ -420,7 +547,10 @@ impl PatientDetail {
             Ok(()) => {
                 self.editor = None;
                 self.reload_visits(neighbour.as_deref(), window, cx);
-                window.push_notification(Notification::success("Visit deleted"), cx);
+                window.push_notification(
+                    Notification::success(t("Kunjungan dihapus", "Visit deleted")),
+                    cx,
+                );
                 cx.emit(PatientDetailEvent::Changed);
             }
             Err(error) => Self::notify_error(window, error, cx),
@@ -437,7 +567,14 @@ impl PatientDetail {
         };
         match print::write_visit_page(patient, visit) {
             Ok(path) => cx.open_url(&print::file_url(&path)),
-            Err(error) => Self::notify_error(window, format!("Cannot print: {error}"), cx),
+            Err(error) => Self::notify_error(
+                window,
+                pick(
+                    format!("Gagal mencetak: {error}"),
+                    format!("Cannot print: {error}"),
+                ),
+                cx,
+            ),
         }
     }
 
@@ -448,10 +585,13 @@ impl PatientDetail {
             return;
         };
         let form = cx.new(|cx| ProfileForm::new(Some(&patient), window, cx));
-        self.profile_subscription = Some(cx.subscribe_in(&form, window, |this, _, event, window, cx| {
-            let ProfileFormEvent::Submit(profile) = event;
-            this.save_profile(profile, window, cx);
-        }));
+        self.profile_subscription =
+            Some(
+                cx.subscribe_in(&form, window, |this, _, event, window, cx| {
+                    let ProfileFormEvent::Submit(profile) = event;
+                    this.save_profile(profile, window, cx);
+                }),
+            );
 
         let first_render = Cell::new(true);
         window.open_dialog(cx, move |dialog, window, cx| {
@@ -460,30 +600,43 @@ impl PatientDetail {
             }
             let save = form.clone();
             dialog
-                .title("Edit Patient")
+                .title(t("Ubah Pasien", "Edit Patient"))
                 .w(px(520.))
                 .child(form.clone())
                 .footer(
                     DialogFooter::new()
                         .child(
                             Button::new("profile-cancel")
-                                .label("Cancel")
+                                .label(t("Batal", "Cancel"))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
-                        .child(Button::new("profile-save").primary().label("Save").on_click(
-                            move |_, window, cx| save.update(cx, |form, cx| form.submit(window, cx)),
-                        )),
+                        .child(
+                            Button::new("profile-save")
+                                .primary()
+                                .label(t("Simpan", "Save"))
+                                .on_click(move |_, window, cx| {
+                                    save.update(cx, |form, cx| form.submit(window, cx))
+                                }),
+                        ),
                 )
         });
     }
 
-    fn save_profile(&mut self, profile: &PatientProfile, window: &mut Window, cx: &mut Context<Self>) {
+    fn save_profile(
+        &mut self,
+        profile: &PatientProfile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match self.store.update_patient(&self.patient_id, profile) {
             Ok(patient) => {
                 self.patient = Some(patient);
                 self.profile_subscription = None;
                 window.close_dialog(cx);
-                window.push_notification(Notification::success("Patient updated"), cx);
+                window.push_notification(
+                    Notification::success(t("Pasien diperbarui", "Patient updated")),
+                    cx,
+                );
                 cx.emit(PatientDetailEvent::Changed);
             }
             Err(error) => Self::notify_error(window, error, cx),
@@ -496,13 +649,17 @@ impl PatientDetail {
         window.open_alert_dialog(cx, move |alert, _, _| {
             let this = this.clone();
             alert
-                .title("Delete this patient?")
-                .description("The patient will no longer appear in the lists.")
+                .title(t("Hapus pasien ini?", "Delete this patient?"))
+                .description(t(
+                    "Pasien tidak akan muncul lagi di daftar.",
+                    "The patient will no longer appear in the lists.",
+                ))
                 .show_cancel(true)
                 .ok_text("Delete")
                 .ok_variant(ButtonVariant::Danger)
                 .on_ok(move |_, window, cx| {
-                    this.update(cx, |detail, cx| detail.delete_patient(window, cx)).ok();
+                    this.update(cx, |detail, cx| detail.delete_patient(window, cx))
+                        .ok();
                     true
                 })
         });
@@ -511,7 +668,10 @@ impl PatientDetail {
     fn delete_patient(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.store.delete_patient(&self.patient_id) {
             Ok(()) => {
-                window.push_notification(Notification::success("Patient deleted"), cx);
+                window.push_notification(
+                    Notification::success(t("Pasien dihapus", "Patient deleted")),
+                    cx,
+                );
                 cx.emit(PatientDetailEvent::Deleted);
             }
             Err(error) => Self::notify_error(window, error, cx),
@@ -525,7 +685,11 @@ impl PatientDetail {
         let today = dates::today();
         let or_dash = |value: &str| {
             let value = value.trim();
-            if value.is_empty() { "-".to_string() } else { value.to_string() }
+            if value.is_empty() {
+                "-".to_string()
+            } else {
+                value.to_string()
+            }
         };
         let identity = h_flex()
             .w_full()
@@ -544,7 +708,7 @@ impl PatientDetail {
                     .ghost()
                     .small()
                     .icon(IconName::Pencil)
-                    .tooltip("Edit patient")
+                    .tooltip(t("Ubah pasien", "Edit patient"))
                     .on_click(cx.listener(|this, _, window, cx| this.edit_profile(window, cx))),
             )
             .child(
@@ -552,17 +716,27 @@ impl PatientDetail {
                     .ghost()
                     .small()
                     .icon(IconName::Trash)
-                    .tooltip("Delete patient")
-                    .on_click(cx.listener(|this, _, window, cx| this.confirm_delete_patient(window, cx))),
+                    .tooltip(t("Hapus pasien", "Delete patient"))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.confirm_delete_patient(window, cx)),
+                    ),
             );
         let profile = DescriptionList::horizontal()
             .columns(1)
             .label_width(px(110.))
-            .item("Nama KK", or_dash(&patient.head_family_name), 1)
-            .item("Tanggal Lahir", dates::display_with_age(&patient.birth_date, today), 1)
-            .item("Alamat", or_dash(&patient.address), 1)
             .item(
-                "Kunjungan Terakhir",
+                t("Nama KK", "Head of Family"),
+                or_dash(&patient.head_family_name),
+                1,
+            )
+            .item(
+                t("Tanggal Lahir", "Date of Birth"),
+                dates::display_with_age(&patient.birth_date, today),
+                1,
+            )
+            .item(t("Alamat", "Address"), or_dash(&patient.address), 1)
+            .item(
+                t("Kunjungan Terakhir", "Last Visit"),
                 dates::display_with_relative(&patient.last_visit, today),
                 1,
             );
@@ -582,71 +756,89 @@ impl PatientDetail {
                     .child(div().text_sm().child(profile)),
             )
             .child(
-                widgets::pane_header("Visits", Some(self.visit_count), cx).child(
+                widgets::pane_header(t("Kunjungan", "Visits"), Some(self.visit_count), cx).child(
                     Button::new("new-entry")
                         .primary()
                         .xsmall()
                         .icon(IconName::Plus)
-                        .label("New Entry")
+                        .label(t("Kunjungan Baru", "New Visit"))
                         .disabled(self.composer.is_some())
-                        .on_click(cx.listener(|this, _, window, cx| this.open_composer(window, cx))),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_composer(window, cx)),
+                        ),
                 ),
             )
             .child(div().flex_1().min_h(px(0.)).child(List::new(&self.visits)))
     }
 
     fn render_selected(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (scroll_id, content): (SharedString, AnyElement) = if let Some((composer, _)) = &self.composer {
-            (
-                "patient-new-entry".into(),
-                v_flex()
-                    .w_full()
-                    .gap_2()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("New Entry"))
-                    .child(composer.clone())
-                    .into_any_element(),
-            )
-        } else if let Some((id, editor, _)) = &self.editor {
-            (format!("patient-edit-{id}").into(), editor.clone().into_any_element())
-        } else if let Some(visit) = self
-            .selected
-            .as_deref()
-            .and_then(|id| self.visits.read(cx).delegate().visit(id))
-            .cloned()
-        {
-            let action = |name: &str, icon: IconName, tooltip: &'static str| {
-                Button::new(SharedString::from(format!("{name}-{}", visit.id)))
-                    .icon(icon)
-                    .ghost()
-                    .small()
-                    .tooltip(tooltip)
+        let (scroll_id, content): (SharedString, AnyElement) =
+            if let Some((composer, _)) = &self.composer {
+                (
+                    "patient-new-entry".into(),
+                    v_flex()
+                        .w_full()
+                        .gap_2()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(t("Kunjungan Baru", "New Visit")),
+                        )
+                        .child(composer.clone())
+                        .into_any_element(),
+                )
+            } else if let Some((id, editor, _)) = &self.editor {
+                (
+                    format!("patient-edit-{id}").into(),
+                    editor.clone().into_any_element(),
+                )
+            } else if let Some(visit) = self
+                .selected
+                .as_deref()
+                .and_then(|id| self.visits.read(cx).delegate().visit(id))
+                .cloned()
+            {
+                let action = |name: &str, icon: IconName, tooltip: &'static str| {
+                    Button::new(SharedString::from(format!("{name}-{}", visit.id)))
+                        .icon(icon)
+                        .ghost()
+                        .small()
+                        .tooltip(tooltip)
+                };
+                let (print_id, edit_id, delete_id) =
+                    (visit.id.clone(), visit.id.clone(), visit.id.clone());
+                let actions = [
+                    action("print", IconName::Printer, t("Cetak", "Print"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.print_entry(&print_id, window, cx)
+                        }))
+                        .into_any_element(),
+                    action("edit", IconName::Pencil, t("Ubah", "Edit"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.edit_entry(&edit_id, window, cx)
+                        }))
+                        .into_any_element(),
+                    action("delete", IconName::Trash, t("Hapus", "Delete"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.confirm_delete_entry(delete_id.clone(), window, cx)
+                        }))
+                        .into_any_element(),
+                ];
+                (
+                    format!("patient-visit-scroll-{}", visit.id).into(),
+                    entry_view("patient", &visit, actions, cx).into_any_element(),
+                )
+            } else {
+                return widgets::empty_state(
+                    IconName::Calendar,
+                    t("Belum ada kunjungan yang dipilih", "No visit selected"),
+                    t(
+                        "Pilih kunjungan dari daftar, atau tulis kunjungan baru.",
+                        "Choose a visit from the list, or write a new one.",
+                    ),
+                    cx,
+                );
             };
-            let (print_id, edit_id, delete_id) = (visit.id.clone(), visit.id.clone(), visit.id.clone());
-            let actions = [
-                action("print", IconName::Printer, "Print")
-                    .on_click(cx.listener(move |this, _, window, cx| this.print_entry(&print_id, window, cx)))
-                    .into_any_element(),
-                action("edit", IconName::Pencil, "Edit")
-                    .on_click(cx.listener(move |this, _, window, cx| this.edit_entry(&edit_id, window, cx)))
-                    .into_any_element(),
-                action("delete", IconName::Trash, "Delete")
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.confirm_delete_entry(delete_id.clone(), window, cx)
-                    }))
-                    .into_any_element(),
-            ];
-            (
-                format!("patient-visit-scroll-{}", visit.id).into(),
-                entry_view("patient", &visit, actions, cx).into_any_element(),
-            )
-        } else {
-            return widgets::empty_state(
-                IconName::Calendar,
-                "No visit selected",
-                "Choose a visit from the list, or write a new entry.",
-                cx,
-            );
-        };
 
         div()
             .id(scroll_id)
@@ -662,20 +854,26 @@ impl Render for PatientDetail {
         let Some(patient) = self.patient.clone() else {
             return widgets::empty_state(
                 IconName::User,
-                "Patient not found",
-                "The patient may have been deleted.",
+                t("Pasien tidak ditemukan", "Patient not found"),
+                t(
+                    "Pasien mungkin sudah dihapus.",
+                    "The patient may have been deleted.",
+                ),
                 cx,
             );
         };
 
-        h_resizable(SharedString::from(format!("patient-split-{}", self.patient_id)))
-            .child(
-                resizable_panel()
-                    .size(px(330.))
-                    .size_range(px(260.)..px(480.))
-                    .child(self.render_patient_column(&patient, cx)),
-            )
-            .child(resizable_panel().child(self.render_selected(cx)))
-            .into_any_element()
+        h_resizable(SharedString::from(format!(
+            "patient-split-{}",
+            self.patient_id
+        )))
+        .child(
+            resizable_panel()
+                .size(px(330.))
+                .size_range(px(260.)..px(480.))
+                .child(self.render_patient_column(&patient, cx)),
+        )
+        .child(resizable_panel().child(self.render_selected(cx)))
+        .into_any_element()
     }
 }

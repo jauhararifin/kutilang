@@ -10,12 +10,15 @@ use gpui_kit::component::{ActiveTheme as _, Icon, TitleBar, WindowExt as _, h_fl
 use gpui_kit::prelude::*;
 use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, px};
 
+use crate::i18n::{pick, t};
 use crate::store::{MigrationReport, Store};
 use crate::ui::patients::{PatientsEvent, PatientsView};
-use crate::ui::{BackUp, ExportToExcel, NewPatient, RestoreBackup, ShowPatients, ShowSettings, ShowVisits};
 use crate::ui::settings::{SettingsEvent, SettingsView};
 use crate::ui::visits::{VisitsEvent, VisitsView};
 use crate::ui::widgets;
+use crate::ui::{
+    BackUp, ExportToExcel, NewPatient, RestoreBackup, ShowPatients, ShowSettings, ShowVisits,
+};
 
 /// Shown in the title bar, as in the original application.
 pub const BRAND: &str = "MR Pasien dr Syamsul Hadi, SpPD";
@@ -26,6 +29,13 @@ pub enum Section {
     Visits,
     Settings,
 }
+
+pub enum AppEvent {
+    /// Texts built when the views were made are in the old language.
+    LanguageChanged,
+}
+
+impl gpui_kit::EventEmitter<AppEvent> for KutilangApp {}
 
 pub struct KutilangApp {
     store: Rc<Store>,
@@ -76,11 +86,14 @@ impl KutilangApp {
     ) -> Self {
         let (patients, visits, record_subscriptions) = record_views(&store, window, cx);
         let settings = cx.new(|cx| SettingsView::new(store.clone(), db_path.clone(), window, cx));
-        let subscriptions = vec![cx.subscribe_in(&settings, window, |this, _, event, window, cx| {
-            match event {
+        let subscriptions = vec![cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, event, window, cx| match event {
                 SettingsEvent::DataReplaced => this.reload_records(window, cx),
-            }
-        })];
+                SettingsEvent::LanguageChanged => cx.emit(AppEvent::LanguageChanged),
+            },
+        )];
 
         if let Some(report) = migration {
             cx.defer_in(window, move |_, window, cx| {
@@ -104,6 +117,15 @@ impl KutilangApp {
         };
         app.refresh_counts();
         app
+    }
+
+    /// The open database file.
+    pub fn db_path(&self) -> &PathBuf {
+        &self.db_path
+    }
+
+    pub fn store(&self) -> &Rc<Store> {
+        &self.store
     }
 
     pub fn section(&self) -> Section {
@@ -196,17 +218,17 @@ impl KutilangApp {
         Sidebar::new("sidebar")
             .w(px(210.))
             .child(
-                SidebarGroup::new("Medical Records").child(
+                SidebarGroup::new(t("Rekam Medis", "Medical Records")).child(
                     SidebarMenu::new()
                         .child(self.menu_item(
-                            "Patients",
+                            t("Pasien", "Patients"),
                             IconName::Users,
                             Section::Patients,
                             Some(self.patient_count),
                             cx,
                         ))
                         .child(self.menu_item(
-                            "Visits",
+                            t("Kunjungan", "Visits"),
                             IconName::Calendar,
                             Section::Visits,
                             Some(self.visit_count),
@@ -214,9 +236,17 @@ impl KutilangApp {
                         )),
                 ),
             )
-            .child(SidebarGroup::new("Application").child(SidebarMenu::new().child(
-                self.menu_item("Settings", IconName::Settings, Section::Settings, None, cx),
-            )))
+            .child(
+                SidebarGroup::new(t("Aplikasi", "Application")).child(SidebarMenu::new().child(
+                    self.menu_item(
+                        t("Pengaturan", "Settings"),
+                        IconName::Settings,
+                        Section::Settings,
+                        None,
+                        cx,
+                    ),
+                )),
+            )
     }
 
     fn render_title(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -228,14 +258,12 @@ impl KutilangApp {
             .child(div().text_color(cx.theme().muted_foreground).child(BRAND))
             .child(div().text_color(cx.theme().muted_foreground).child("·"))
             .child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        self.db_path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                    ),
+                div().text_color(cx.theme().muted_foreground).child(
+                    self.db_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                ),
             )
     }
 }
@@ -244,14 +272,23 @@ fn migration_notice(report: &MigrationReport) -> Notification {
     let backup = report
         .backup_path
         .as_ref()
-        .map(|path| format!(" A copy of the old database was saved as {}.", path.display()))
+        .map(|path| {
+            let path = path.display();
+            pick(
+                format!(" Salinan database lama disimpan sebagai {path}."),
+                format!(" A copy of the old database was saved as {path}."),
+            )
+        })
         .unwrap_or_default();
-    Notification::info(format!(
-        "The database was upgraded to the new format ({} patients, {} visits).{backup}",
+    let (patients, visits) = (
         widgets::format_count(report.patients),
-        widgets::format_count(report.visits)
+        widgets::format_count(report.visits),
+    );
+    Notification::info(pick(
+        format!("Database diperbarui ke format baru ({patients} pasien, {visits} kunjungan).{backup}"),
+        format!("The database was upgraded to the new format ({patients} patients, {visits} visits).{backup}"),
     ))
-    .title("Database upgraded")
+    .title(t("Database diperbarui", "Database upgraded"))
     .autohide(false)
 }
 
@@ -276,17 +313,21 @@ impl Render for KutilangApp {
                 this.show(Section::Settings, window, cx)
             }))
             .on_action(cx.listener(|this, _: &BackUp, window, cx| {
-                this.settings.update(cx, |settings, cx| settings.back_up(window, cx))
+                this.settings
+                    .update(cx, |settings, cx| settings.back_up(window, cx))
             }))
             .on_action(cx.listener(|this, _: &RestoreBackup, window, cx| {
-                this.settings.update(cx, |settings, cx| settings.restore(window, cx))
+                this.settings
+                    .update(cx, |settings, cx| settings.restore(window, cx))
             }))
             .on_action(cx.listener(|this, _: &ExportToExcel, window, cx| {
-                this.settings.update(cx, |settings, cx| settings.export(window, cx))
+                this.settings
+                    .update(cx, |settings, cx| settings.export(window, cx))
             }))
             .on_action(cx.listener(|this, _: &NewPatient, window, cx| {
                 this.show(Section::Patients, window, cx);
-                this.patients.update(cx, |patients, cx| patients.new_patient(window, cx));
+                this.patients
+                    .update(cx, |patients, cx| patients.new_patient(window, cx));
             }))
             .child(TitleBar::new().child(self.render_title(cx)))
             .child(

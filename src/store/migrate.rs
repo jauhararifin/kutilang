@@ -77,8 +77,12 @@ fn apply_upgrades(conn: &Connection) -> Result<()> {
     let current = user_version(conn)?;
     for &(version, sql) in UPGRADES.iter().filter(|(version, _)| *version > current) {
         let tx = conn.unchecked_transaction()?;
-        tx.execute_batch(sql)
-            .with_context(|| format!("cannot upgrade the database to schema {version}"))?;
+        tx.execute_batch(sql).with_context(|| {
+            crate::i18n::pick(
+                format!("database tidak dapat diperbarui ke skema {version}"),
+                format!("cannot upgrade the database to schema {version}"),
+            )
+        })?;
         tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
     }
@@ -123,7 +127,12 @@ fn detect(conn: &Connection) -> Result<Layout> {
         return Ok(Layout::Versioned(version));
     }
     if version != 0 {
-        bail!("Unknown database schema version {version}.");
+        bail!(crate::i18n::pick(
+            format!(
+                "Versi skema database {version} tidak dikenal; mungkin dibuat oleh versi Kutilang yang lebih baru."
+            ),
+            format!("Unknown database schema version {version}.")
+        ));
     }
 
     let tables = table_names(conn)?;
@@ -132,17 +141,34 @@ fn detect(conn: &Connection) -> Result<Layout> {
     }
 
     if !tables.contains("patients") || !tables.contains("visits") {
-        bail!("This file does not look like a Kutilang database (tables: {tables:?}).");
+        bail!(crate::i18n::pick(
+            format!("Berkas ini bukan database Kutilang (tabel: {tables:?})."),
+            format!("This file does not look like a Kutilang database (tables: {tables:?}).")
+        ));
     }
     let patient_columns = column_names(conn, "patients")?;
     let visit_columns = column_names(conn, "visits")?;
     let patients_ok = has_columns(
         &patient_columns,
-        &["id", "name", "head_family_name", "birth_date", "address", "last_visit", "is_deleted"],
+        &[
+            "id",
+            "name",
+            "head_family_name",
+            "birth_date",
+            "address",
+            "last_visit",
+            "is_deleted",
+        ],
     );
-    let visits_ok = has_columns(&visit_columns, &["id", "patient_id", "diagnosis", "is_deleted"]);
+    let visits_ok = has_columns(
+        &visit_columns,
+        &["id", "patient_id", "diagnosis", "is_deleted"],
+    );
     if !patients_ok || !visits_ok {
-        bail!("Unrecognised Kutilang database layout, refusing to modify it.");
+        bail!(crate::i18n::t(
+            "Susunan database Kutilang tidak dikenal, berkas tidak diubah.",
+            "Unrecognised Kutilang database layout, refusing to modify it."
+        ));
     }
 
     if visit_columns.contains("date") {
@@ -150,7 +176,10 @@ fn detect(conn: &Connection) -> Result<Layout> {
     } else if visit_columns.contains("timestamp") {
         Ok(Layout::Legacy(VisitDateColumn::Timestamp))
     } else {
-        bail!("Unrecognised Kutilang database layout: visits have no date column.");
+        bail!(crate::i18n::t(
+            "Susunan database Kutilang tidak dikenal: kunjungan tidak punya kolom tanggal.",
+            "Unrecognised Kutilang database layout: visits have no date column."
+        ));
     }
 }
 
@@ -206,7 +235,12 @@ fn migrate_legacy(
         Some(path) => {
             let backup = backup_path_for(path);
             conn.execute("VACUUM INTO ?1", params![backup.to_string_lossy()])
-                .with_context(|| format!("cannot write backup to {}", backup.display()))?;
+                .with_context(|| {
+                    crate::i18n::pick(
+                        format!("cadangan tidak dapat ditulis ke {}", backup.display()),
+                        format!("cannot write backup to {}", backup.display()),
+                    )
+                })?;
             Some(backup)
         }
         None => None,
@@ -251,10 +285,11 @@ fn migrate_legacy(
         ),
         [],
     )?;
-    let total_visits: i64 =
-        tx.query_row("SELECT count(*) FROM legacy_visits WHERE id IS NOT NULL", [], |r| {
-            r.get(0)
-        })?;
+    let total_visits: i64 = tx.query_row(
+        "SELECT count(*) FROM legacy_visits WHERE id IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
     let total_visits = total_visits as usize;
 
     // The Go app only raised `last_visit` when a visit was added, so changing
@@ -270,9 +305,8 @@ fn migrate_legacy(
 
     // Rebuild the search index from the names.
     {
-        let mut select = tx.prepare(
-            "SELECT id, name, head_family_name FROM patients WHERE is_deleted = 0",
-        )?;
+        let mut select =
+            tx.prepare("SELECT id, name, head_family_name FROM patients WHERE is_deleted = 0")?;
         let mut insert =
             tx.prepare("INSERT INTO patient_keywords (keyword, patient_id) VALUES (?1, ?2)")?;
         let rows = select

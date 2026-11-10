@@ -19,7 +19,10 @@ pub fn entry_view(
 ) -> Div {
     let today = dates::today();
     let (title, relative) = match dates::parse_stored(&visit.date) {
-        Some(date) => (dates::format_with_weekday(date), dates::format_relative(date, today)),
+        Some(date) => (
+            dates::format_with_weekday(date),
+            dates::format_relative(date, today),
+        ),
         None => (visit.date.clone(), String::new()),
     };
     let text_id = SharedString::from(format!("{scope}-visit-{}", visit.id));

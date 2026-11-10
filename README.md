@@ -71,6 +71,12 @@ understand the new schema. To go back, use the backup copy.
 
 ## Using it
 
+The interface is in Indonesian by default (Pasien, Kunjungan, Pengaturan…);
+**Settings → Language** switches between Bahasa Indonesia and English. The
+choice covers menus, buttons, messages, dates and the Excel export's sheet and
+column names, and is remembered in `language.txt` next to the recent
+databases list. The labels below are the English ones.
+
 The window follows the platform's conventions: a title bar drawn by the app, a
 sidebar, list-and-detail panes with a draggable divider, dialogs for forms, a
 light theme, and menus with keyboard shortcuts (Cmd on
@@ -84,13 +90,13 @@ macOS, Ctrl on Windows and Linux).
   columns: their details above the list of all their visits (how many, when,
   and a one-line summary of each), and next to it the selected visit's
   diagnosis (Print, Edit, Delete).
-  **New Entry** opens the editor, filled with the template.
+  **New Visit** (Kunjungan Baru) opens the editor, filled with the template.
 * **New patient**: the person icon above the list, or Cmd/Ctrl-N.
 * **Visits** (Cmd/Ctrl-2): the history of every visit of every patient, newest
   first, grouped by day, each with a one-line summary. Filter by patient name
-  and by dates (Hari ini, 7 hari terakhir, 30 hari terakhir, Bulan ini, Tahun
-  ini, or any range). **Open Patient** jumps to the patient.
-* **Settings** (Cmd/Ctrl-,): backup, restore and export; the template new
+  and by dates (Today, Last 7 days, Last 30 days, This month, This year, or any
+  range). **Open Patient** jumps to the patient.
+* **Settings** (Cmd/Ctrl-,): the language; backup, restore and export; the template new
   entries start from, edited in Markdown with a live preview (**Reset to
   Default** brings back the original template); which database file is open.
 * **Back Up…** (File menu or Settings): saves a copy of everything (patients,

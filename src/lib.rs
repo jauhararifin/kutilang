@@ -4,6 +4,7 @@
 pub mod dates;
 pub mod diagnosis;
 pub mod export;
+pub mod i18n;
 pub mod keywords;
 pub mod model;
 pub mod print;

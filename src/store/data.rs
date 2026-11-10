@@ -62,21 +62,38 @@ impl Store {
     /// Writes a complete, consistent copy of the database to `path`,
     /// replacing the file if it exists.
     pub fn backup_to(&self, path: &Path) -> Result<()> {
-        let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let dir = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
         // `VACUUM INTO` needs a new file: write next to the target, then
         // move it into place so a failure never leaves half a file.
         let temp = tempfile::Builder::new()
             .prefix(".kutilang-backup-")
             .suffix(".sqlite3")
             .tempfile_in(dir)
-            .with_context(|| format!("cannot write to {}", dir.display()))?
+            .with_context(|| {
+                crate::i18n::pick(
+                    format!("tidak dapat menulis ke {}", dir.display()),
+                    format!("cannot write to {}", dir.display()),
+                )
+            })?
             .into_temp_path();
         std::fs::remove_file(&temp)?;
         self.conn
             .execute("VACUUM INTO ?1", params![temp.to_string_lossy()])
-            .with_context(|| format!("cannot back up to {}", path.display()))?;
-        temp.persist(path)
-            .with_context(|| format!("cannot write {}", path.display()))?;
+            .with_context(|| {
+                crate::i18n::pick(
+                    format!("tidak dapat mencadangkan ke {}", path.display()),
+                    format!("cannot back up to {}", path.display()),
+                )
+            })?;
+        temp.persist(path).with_context(|| {
+            crate::i18n::pick(
+                format!("tidak dapat menulis {}", path.display()),
+                format!("cannot write {}", path.display()),
+            )
+        })?;
         Ok(())
     }
 
@@ -85,9 +102,18 @@ impl Store {
     pub fn open_backup(path: &Path) -> Result<Backup> {
         let dir = tempfile::tempdir()?;
         let copy = dir.path().join("backup.sqlite3");
-        std::fs::copy(path, &copy).with_context(|| format!("cannot read {}", path.display()))?;
-        let (store, _) = Store::open(&copy)
-            .with_context(|| format!("{} is not a Kutilang backup", path.display()))?;
+        std::fs::copy(path, &copy).with_context(|| {
+            crate::i18n::pick(
+                format!("tidak dapat membaca {}", path.display()),
+                format!("cannot read {}", path.display()),
+            )
+        })?;
+        let (store, _) = Store::open(&copy).with_context(|| {
+            crate::i18n::pick(
+                format!("{} bukan cadangan Kutilang", path.display()),
+                format!("{} is not a Kutilang backup", path.display()),
+            )
+        })?;
         let patients = store.count_patients()?;
         let visits = store.count_visits()?;
         Ok(Backup {
@@ -102,8 +128,10 @@ impl Store {
     /// Replaces every record (patients, visits, settings) with the backup's,
     /// in one transaction.
     pub fn restore(&self, backup: &Backup) -> Result<()> {
-        self.conn
-            .execute("ATTACH DATABASE ?1 AS backup", params![backup.copy.to_string_lossy()])?;
+        self.conn.execute(
+            "ATTACH DATABASE ?1 AS backup",
+            params![backup.copy.to_string_lossy()],
+        )?;
         let result = (|| -> Result<()> {
             let tx = self.conn.unchecked_transaction()?;
             tx.execute_batch(
@@ -137,10 +165,14 @@ impl Store {
         result?;
 
         let violation: Option<String> = rusqlite::OptionalExtension::optional(
-            self.conn.query_row("PRAGMA foreign_key_check", [], |row| row.get(0)),
+            self.conn
+                .query_row("PRAGMA foreign_key_check", [], |row| row.get(0)),
         )?;
         if let Some(table) = violation {
-            bail!("the restored data is inconsistent ({table})");
+            bail!(crate::i18n::pick(
+                format!("data yang dipulihkan tidak konsisten ({table})"),
+                format!("the restored data is inconsistent ({table})")
+            ));
         }
         Ok(())
     }

@@ -27,7 +27,8 @@ use crate::model::{
 /// The settings key of the entry template.
 const TEMPLATE_SETTING: &str = "diagnosis_template";
 
-const PATIENT_COLUMNS: &str = "p.id, p.name, p.head_family_name, p.birth_date, p.address, p.last_visit";
+const PATIENT_COLUMNS: &str =
+    "p.id, p.name, p.head_family_name, p.birth_date, p.address, p.last_visit";
 const VISIT_COLUMNS: &str = "v.id, v.patient_id, v.date, v.diagnosis, v.diagnosis_format";
 
 pub struct Store {
@@ -77,7 +78,7 @@ fn into_page<T>(mut items: Vec<T>, limit: usize, cursor: impl Fn(&T) -> Cursor) 
 
 fn check_diagnosis(diagnosis: &str) -> Result<()> {
     if diagnosis.trim().is_empty() {
-        bail!("Missing diagnosis");
+        bail!(crate::i18n::t("Diagnosis belum diisi", "Missing diagnosis"));
     }
     Ok(())
 }
@@ -122,7 +123,9 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                &format!("SELECT {PATIENT_COLUMNS} FROM patients p WHERE p.id = ?1 AND p.is_deleted = 0"),
+                &format!(
+                    "SELECT {PATIENT_COLUMNS} FROM patients p WHERE p.id = ?1 AND p.is_deleted = 0"
+                ),
                 [id],
                 patient_from_row,
             )
@@ -175,13 +178,20 @@ impl Store {
             ],
         )?;
         if changed == 0 {
-            bail!("Patient not found");
+            bail!(crate::i18n::t(
+                "Pasien tidak ditemukan",
+                "Patient not found"
+            ));
         }
         tx.execute("DELETE FROM patient_keywords WHERE patient_id = ?1", [id])?;
         insert_keywords(&tx, id, &profile.name, &profile.head_family_name)?;
         tx.commit()?;
-        self.get_patient(id)?
-            .ok_or_else(|| anyhow::anyhow!("Patient not found"))
+        self.get_patient(id)?.ok_or_else(|| {
+            anyhow::anyhow!(crate::i18n::t(
+                "Pasien tidak ditemukan",
+                "Patient not found"
+            ))
+        })
     }
 
     /// Hides the patient. Nothing is erased: the row and the visits stay in
@@ -193,7 +203,10 @@ impl Store {
             params![id, now()],
         )?;
         if changed == 0 {
-            bail!("Patient not found");
+            bail!(crate::i18n::t(
+                "Pasien tidak ditemukan",
+                "Patient not found"
+            ));
         }
         tx.execute("DELETE FROM patient_keywords WHERE patient_id = ?1", [id])?;
         tx.commit()?;
@@ -219,9 +232,11 @@ impl Store {
     }
 
     pub fn count_patients(&self) -> Result<usize> {
-        let count: i64 = self
-            .conn
-            .query_row("SELECT count(*) FROM patients WHERE is_deleted = 0", [], |r| r.get(0))?;
+        let count: i64 = self.conn.query_row(
+            "SELECT count(*) FROM patients WHERE is_deleted = 0",
+            [],
+            |r| r.get(0),
+        )?;
         Ok(count as usize)
     }
 
@@ -296,7 +311,9 @@ impl Store {
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         Ok(self
             .conn
-            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
             .optional()?)
     }
 
@@ -310,7 +327,8 @@ impl Store {
     }
 
     pub fn remove_setting(&self, key: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
         Ok(())
     }
 
@@ -344,7 +362,9 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                &format!("SELECT {VISIT_COLUMNS} FROM visits v WHERE v.id = ?1 AND v.is_deleted = 0"),
+                &format!(
+                    "SELECT {VISIT_COLUMNS} FROM visits v WHERE v.id = ?1 AND v.is_deleted = 0"
+                ),
                 [id],
                 visit_from_row,
             )
@@ -358,8 +378,9 @@ impl Store {
         after: Option<&Cursor>,
         limit: usize,
     ) -> Result<Page<Visit>> {
-        let mut sql =
-            format!("SELECT {VISIT_COLUMNS} FROM visits v WHERE v.patient_id = ? AND v.is_deleted = 0");
+        let mut sql = format!(
+            "SELECT {VISIT_COLUMNS} FROM visits v WHERE v.patient_id = ? AND v.is_deleted = 0"
+        );
         let mut args = vec![Value::Text(patient_id.to_string())];
         if let Some(cursor) = after {
             sql.push_str(" AND (v.date < ? OR (v.date = ? AND v.id < ?))");
@@ -393,7 +414,10 @@ impl Store {
             .optional()?
             .is_some();
         if !exists {
-            bail!("Patient does not exist");
+            bail!(crate::i18n::t(
+                "Pasien tidak ditemukan",
+                "Patient does not exist"
+            ));
         }
 
         let visit = Visit {
@@ -424,12 +448,20 @@ impl Store {
     /// Changes a visit's date and, when `diagnosis` is given, its text (which
     /// is then stored as Markdown). Leaving the text alone keeps a visit of
     /// the original application in its original HTML.
-    pub fn update_visit(&self, id: &str, date: NaiveDate, diagnosis: Option<&str>) -> Result<Visit> {
+    pub fn update_visit(
+        &self,
+        id: &str,
+        date: NaiveDate,
+        diagnosis: Option<&str>,
+    ) -> Result<Visit> {
         if let Some(diagnosis) = diagnosis {
             check_diagnosis(diagnosis)?;
         }
         let Some(visit) = self.get_visit(id)? else {
-            bail!("Visit not found");
+            bail!(crate::i18n::t(
+                "Kunjungan tidak ditemukan",
+                "Visit not found"
+            ));
         };
         let date = dates::to_stored(date);
         let tx = self.conn.unchecked_transaction()?;
@@ -446,8 +478,12 @@ impl Store {
         };
         raise_last_visit(&tx, &visit.patient_id, &date)?;
         tx.commit()?;
-        self.get_visit(id)?
-            .ok_or_else(|| anyhow::anyhow!("Visit not found"))
+        self.get_visit(id)?.ok_or_else(|| {
+            anyhow::anyhow!(crate::i18n::t(
+                "Kunjungan tidak ditemukan",
+                "Visit not found"
+            ))
+        })
     }
 
     /// Hides a visit; the row stays in the database.
@@ -457,7 +493,10 @@ impl Store {
             params![id, now()],
         )?;
         if changed == 0 {
-            bail!("Visit not found");
+            bail!(crate::i18n::t(
+                "Kunjungan tidak ditemukan",
+                "Visit not found"
+            ));
         }
         Ok(())
     }
@@ -465,10 +504,18 @@ impl Store {
 
 /// Restricts a query to patients whose name words start with every word of
 /// `query`. `id_column` is the patient id column of the query.
-fn push_name_filter(query: &str, id_column: &str, sql: &mut String, args: &mut Vec<Value>) -> Result<()> {
+fn push_name_filter(
+    query: &str,
+    id_column: &str,
+    sql: &mut String,
+    args: &mut Vec<Value>,
+) -> Result<()> {
     let words = keywords::tokenize(query);
     if words.len() > MAX_QUERY_KEYWORDS {
-        bail!("Search query is too long");
+        bail!(crate::i18n::t(
+            "Kata pencarian terlalu panjang",
+            "Search query is too long"
+        ));
     }
     for word in words {
         // Every keyword starting with `word` sorts between `word` and `word`
@@ -483,7 +530,12 @@ fn push_name_filter(query: &str, id_column: &str, sql: &mut String, args: &mut V
     Ok(())
 }
 
-fn insert_keywords(conn: &Connection, patient_id: &str, name: &str, head_family_name: &str) -> Result<()> {
+fn insert_keywords(
+    conn: &Connection,
+    patient_id: &str,
+    name: &str,
+    head_family_name: &str,
+) -> Result<()> {
     let mut stmt =
         conn.prepare_cached("INSERT INTO patient_keywords (keyword, patient_id) VALUES (?1, ?2)")?;
     for keyword in keywords::patient_keywords(name, head_family_name) {

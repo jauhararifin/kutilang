@@ -117,7 +117,10 @@ pub fn summary(text: &str, format: DiagnosisFormat, max_chars: usize) -> String 
         }
     }
     if out.chars().count() > max_chars {
-        out = out.chars().take(max_chars.saturating_sub(1)).collect::<String>();
+        out = out
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>();
         out.push('…');
     }
     out
@@ -245,7 +248,9 @@ fn markdown_lines(markdown: &str, keep_headings: bool) -> Vec<String> {
                 .unwrap_or_else(|| {
                     let digits = line.chars().take_while(char::is_ascii_digit).count();
                     match line[digits..].strip_prefix(['.', ')']) {
-                        Some(rest) if digits > 0 && (rest.is_empty() || rest.starts_with(' ')) => rest,
+                        Some(rest) if digits > 0 && (rest.is_empty() || rest.starts_with(' ')) => {
+                            rest
+                        }
                         _ => line,
                     }
                 });
@@ -290,7 +295,10 @@ mod tests {
 
     #[test]
     fn code_fences_are_left_alone() {
-        assert_eq!(with_line_breaks("a\n```\nx\ny\n```\nb"), "a\n```\nx\ny\n```\nb\n");
+        assert_eq!(
+            with_line_breaks("a\n```\nx\ny\n```\nb"),
+            "a\n```\nx\ny\n```\nb\n"
+        );
     }
 
     #[test]
@@ -308,14 +316,20 @@ mod tests {
             summary(html, DiagnosisFormat::Html, 160),
             "KU: meriang · TD: 120/80 & HR 80"
         );
-        let markdown = TEMPLATE
-            .replace("**KU**: \n", "**KU**: lemas\n")
-            .replacen("1. \n", "1. ISPA\n", 1);
+        let markdown =
+            TEMPLATE
+                .replace("**KU**: \n", "**KU**: lemas\n")
+                .replacen("1. \n", "1. ISPA\n", 1);
         let text = summary(&markdown, DiagnosisFormat::Markdown, 2000);
         assert!(text.starts_with("KU: lemas · RPD: Maag (-)"), "{text}");
         assert!(text.ends_with("ISPA"), "{text}");
         assert!(!text.contains("Subjektif") && !text.contains("RPS") && !text.contains("**"));
-        assert_eq!(summary(TEMPLATE, DiagnosisFormat::Markdown, 20).chars().count(), 20);
+        assert_eq!(
+            summary(TEMPLATE, DiagnosisFormat::Markdown, 20)
+                .chars()
+                .count(),
+            20
+        );
         assert!(summary(TEMPLATE, DiagnosisFormat::Markdown, 20).ends_with('…'));
         assert_eq!(summary("", DiagnosisFormat::Html, 20), "");
     }
@@ -323,7 +337,10 @@ mod tests {
     #[test]
     fn plain_text_keeps_every_line() {
         let html = "<h5>Subjektif</h5><p><strong>KU</strong>: meriang&nbsp;</p><ul><li>TD: 120/80</li></ul>";
-        assert_eq!(plain_text(html, DiagnosisFormat::Html), "Subjektif\nKU: meriang\nTD: 120/80");
+        assert_eq!(
+            plain_text(html, DiagnosisFormat::Html),
+            "Subjektif\nKU: meriang\nTD: 120/80"
+        );
         let markdown = "##### Subjektif\n\n**KU**: lemas\n\n- **TD**: 120/80\n1. ISPA";
         assert_eq!(
             plain_text(markdown, DiagnosisFormat::Markdown),
@@ -344,7 +361,10 @@ mod tests {
     fn template_renders_its_sections() {
         let html = to_html(TEMPLATE, DiagnosisFormat::Markdown);
         for section in ["Subjektif", "Objektif", "Assesment", "Planning"] {
-            assert!(html.contains(&format!("<h5>{section}</h5>")), "{section}: {html}");
+            assert!(
+                html.contains(&format!("<h5>{section}</h5>")),
+                "{section}: {html}"
+            );
         }
         assert!(html.contains("<strong>Nyeri ketok CF</strong>: ka (-) ki (-)"));
         assert_eq!(html.matches("<li>").count(), 9, "{html}");
@@ -356,6 +376,9 @@ mod tests {
             editable_markdown("<p><strong>KU</strong>: baik</p>", DiagnosisFormat::Html),
             "**KU**: baik"
         );
-        assert_eq!(editable_markdown("**x**", DiagnosisFormat::Markdown), "**x**");
+        assert_eq!(
+            editable_markdown("**x**", DiagnosisFormat::Markdown),
+            "**x**"
+        );
     }
 }
