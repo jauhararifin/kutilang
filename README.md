@@ -12,8 +12,8 @@ automatically.
 
 ```sh
 cargo run --release                         # the default database (see below)
-cargo run --release -- --db ../db.sqlite3   # a specific file
-cargo run --release -- --db ../db.sqlite3 --upgrade-only   # upgrade and exit
+cargo run --release -- --db path/to/db.sqlite3   # a specific file
+cargo run --release -- --db path/to/db.sqlite3 --upgrade-only   # upgrade and exit
 ```
 
 The default database is the one the original application used, so an existing
@@ -77,8 +77,10 @@ macOS, Ctrl on Windows and Linux).
   search field narrows the list at once: each word must start a word of the
   name or head of family name (`nur` finds Nur, Nuri and Nurul; `siti jo` finds
   Siti whose head of family is Joko). Sort by most recent visit or by name.
-  Arrow keys move through the list; the selected patient is shown on the right
-  with the profile and the visit history (Print, Edit, Delete on each entry).
+  Arrow keys move through the list. The selected patient is shown in two
+  columns: their details above the list of all their visits (how many, when,
+  and a one-line summary of each), and next to it the selected visit's
+  diagnosis (Print, Edit, Delete).
   **New Entry** opens the editor, filled with the template.
 * **New patient**: the person icon above the list, or Cmd/Ctrl-N.
 * **Visits** (Cmd/Ctrl-2): the history of every visit of every patient, newest
@@ -106,6 +108,12 @@ Differences from the original application:
   it in the browser's print dialog.
 * Dates are shown in Indonesian with day-level relative times
   (`3 hari yang lalu`).
+
+## The original application
+
+The Go application this replaces (a local web server with a React page) is
+kept in [`kutilang_old/`](kutilang_old) for reference. Its scripts expect to run
+from that folder, e.g. `cd kutilang_old && ./scripts/build.sh`.
 
 ## Development
 

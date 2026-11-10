@@ -13,8 +13,7 @@ use std::time::Duration;
 
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyWindowHandle, AsyncApp, Context, Entity, Modifiers, PlatformInput, ScrollDelta, ScrollEvent,
-    ScrollSource, TouchPhase, Window, point, px,
+    AnyWindowHandle, AsyncApp, Context, Entity, Window,
 };
 use kutilangv2::dates;
 use kutilangv2::model::{DiagnosisFormat, PatientOrder};
@@ -32,22 +31,6 @@ fn draw(window: AnyWindowHandle, cx: &mut AsyncApp) {
         .update(cx, |_, window, cx| {
             window.refresh();
             window.draw(cx).clear(cx);
-        })
-        .expect("window");
-}
-
-/// Scrolls whatever is under `at` by `pixels` (positive is down).
-fn scroll(window: AnyWindowHandle, at: (f32, f32), pixels: f32, cx: &mut AsyncApp) {
-    window
-        .update(cx, |_, window, cx| {
-            let event = ScrollEvent {
-                position: point(px(at.0), px(at.1)),
-                delta: ScrollDelta::Pixels(point(px(0.), px(-pixels))),
-                modifiers: Modifiers::default(),
-                touch_phase: TouchPhase::Moved,
-                source: ScrollSource::default(),
-            };
-            window.dispatch_event(PlatformInput::Scroll(event), cx);
         })
         .expect("window");
 }
@@ -144,7 +127,15 @@ fn main() {
             });
             settle(cx).await;
             assert_eq!(markdown_entries(&check), before + 1, "new entry stored");
-            println!("ok: a new entry is stored");
+            let (selected, first) = window
+                .update(cx, |_, _, cx| {
+                    let detail = app.read(cx).patients().read(cx).detail().unwrap().clone();
+                    let detail = detail.read(cx);
+                    (detail.selected_visit().map(str::to_string), detail.entry_ids(cx)[0].clone())
+                })
+                .unwrap();
+            assert_eq!(selected.as_deref(), Some(first.as_str()), "the new entry is selected");
+            println!("ok: a new entry is stored, listed first and shown");
 
             // Editing an old entry; saving it untouched keeps its HTML.
             let old = check
@@ -159,7 +150,6 @@ fn main() {
                 let detail = app.patients().read(cx).detail().unwrap().clone();
                 detail.update(cx, |d, cx| d.edit_entry(&old_id, window, cx));
             });
-            scroll(window, (800., 500.), 900., cx);
             capture(window, &out, "05-edit-old-entry", cx).await;
             let old_id = old.id.clone();
             update(window, &app, cx, move |app, window, cx| {
@@ -223,7 +213,7 @@ fn main() {
             });
             update(window, &app, cx, |app, window, cx| {
                 let detail = app.patients().read(cx).detail().unwrap().clone();
-                let first = detail.read(cx).entry_ids()[0].clone();
+                let first = detail.read(cx).entry_ids(cx)[0].clone();
                 detail.update(cx, |d, cx| d.confirm_delete_entry(first, window, cx));
             });
             capture(window, &out, "10-delete-entry", cx).await;

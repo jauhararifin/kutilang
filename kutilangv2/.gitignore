@@ -1,3 +1,0 @@
-/target
-# Databases hold patient data and must never be committed.
-*.sqlite3
