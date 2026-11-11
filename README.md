@@ -187,5 +187,10 @@ Layout, a few long files, each split into titled sections:
   Patients, Visits, Settings, the visit editor, the profile form, icons).
 * `src/main.rs`: the command line.
 
+The application icon is drawn in `assets/app-icon/*.svg` (the stethoscope on
+a teal square); `scripts/make-icons.sh` renders it, on macOS, to the Windows
+`kutilang.ico` (embedded in the executable by `build.rs`) and the macOS
+`Kutilang.icns` (put in the app by `scripts/package-macos.sh`).
+
 The icons in `assets/icons` come from [Lucide](https://lucide.dev) (ISC
 license, see `assets/icons/LICENSE-LUCIDE`); the rest are bundled with GPUI Kit.
