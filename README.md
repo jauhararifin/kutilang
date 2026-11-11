@@ -28,9 +28,26 @@ click away:
 | macOS   | `~/Library/Application Support/kutilang/db.sqlite3`    |
 | Linux   | `~/.config/kutilang/db.sqlite3`                        |
 
-To build for Windows, run `cargo build --release` on Windows with the MSVC
-Rust toolchain; the result is `target\release\kutilangv2.exe` (release builds
-do not open a console window).
+## Downloads
+
+GitHub Actions (`.github/workflows/build.yml`) builds the application on every
+push; the files are on the run's page in the Actions tab, under *Artifacts*.
+Pushing a tag such as `v2.0.0` also publishes them as a release.
+
+| File                            | Contents                                         |
+| ------------------------------- | ------------------------------------------------ |
+| `kutilang-windows-x86_64.zip`   | `kutilang.exe`, which needs nothing installed    |
+| `kutilang-macos.zip`            | `Kutilang.app`, for Apple silicon and Intel Macs |
+| `kutilang-linux-x86_64.tar.gz`  | `kutilang`, for glibc 2.35 or newer              |
+
+The builds are not signed by a known publisher, so the first launch asks for
+confirmation: on Windows, *More info* > *Run anyway*; on macOS, right-click the
+app > *Open*. On Linux the desktop's usual libraries are needed (xkbcommon,
+fontconfig, freetype, and Vulkan or OpenGL drivers).
+
+To build locally, run `cargo build --release`; the result is
+`target/release/kutilang` (`kutilang.exe` on Windows, where release builds do
+not open a console window).
 
 ## Upgrading a database of the original application
 

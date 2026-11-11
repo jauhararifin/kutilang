@@ -12,7 +12,7 @@ use kutilangv2::store::Store;
 const HELP: &str = "\
 Kutilang: medical records for a clinic.
 
-Usage: kutilangv2 [--db PATH] [--upgrade-only]
+Usage: kutilang [--db PATH] [--upgrade-only]
 
 Options:
   --db PATH        Open this database. Without it, the application starts on
@@ -45,7 +45,7 @@ fn parse_args() -> Result<Option<Args>, String> {
                 return Ok(None);
             }
             Some("-V" | "--version") => {
-                println!("kutilangv2 {}", env!("CARGO_PKG_VERSION"));
+                println!("kutilang {}", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
             }
             Some("--upgrade-only") => args.upgrade_only = true,
@@ -73,7 +73,7 @@ fn main() -> ExitCode {
         Ok(Some(args)) => args,
         Ok(None) => return ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("kutilangv2: {message}");
+            eprintln!("kutilang: {message}");
             return ExitCode::FAILURE;
         }
     };
@@ -104,12 +104,12 @@ fn main() -> ExitCode {
                 }
                 match store.count_patients() {
                     Ok(count) => println!("  patients in the database: {count}"),
-                    Err(error) => eprintln!("kutilangv2: {error:#}"),
+                    Err(error) => eprintln!("kutilang: {error:#}"),
                 }
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("kutilangv2: cannot open {}: {error:#}", db_path.display());
+                eprintln!("kutilang: cannot open {}: {error:#}", db_path.display());
                 ExitCode::FAILURE
             }
         };

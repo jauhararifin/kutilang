@@ -5,6 +5,11 @@ edition = "2024"
 description = "Kutilang medical records, rewritten in Rust with GPUI"
 publish = false
 
+# The program is `kutilang`; the library keeps the package's name.
+[[bin]]
+name = "kutilang"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
@@ -25,3 +30,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # A full HTML parser, to check the text of every old visit in tests/store.rs.
 html5ever = "0.27"
 markup5ever_rcdom = "0.3.0"
+
+[profile.release]
+# Smaller downloads: the symbols are only needed for debugging.
+strip = true

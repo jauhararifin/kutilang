@@ -1,0 +1,117 @@
+name: Build
+
+# Builds Kutilang for Linux, Windows and macOS on every push. The binaries
+# are attached to the run (the run's page in the Actions tab, "Artifacts").
+# Pushing a tag such as `v2.0.0` also publishes them as a GitHub release.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# A newer push to the same branch replaces a build still running.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux (x86_64)
+    # The oldest supported runner: the binary then runs on any distribution
+    # with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36...).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the system libraries GPUI builds against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig1-dev libfreetype-dev libwayland-dev \
+            libx11-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --locked
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          mkdir -p dist/kutilang
+          cp target/release/kutilang dist/kutilang/kutilang
+          cp README.md dist/kutilang/
+          tar -C dist -czf kutilang-linux-x86_64.tar.gz kutilang
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kutilang-linux-x86_64
+          path: kutilang-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows (x86_64)
+    runs-on: windows-latest
+    env:
+      # The C runtime is linked in, so the program runs without installing
+      # the Visual C++ redistributable.
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/release/kutilang.exe dist/kutilang.exe
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath kutilang-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kutilang-windows-x86_64
+          path: kutilang-windows-x86_64.zip
+
+  macos:
+    name: macOS (Apple silicon and Intel)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build for Apple silicon
+        run: cargo build --release --locked --target aarch64-apple-darwin
+      - name: Build for Intel
+        run: cargo build --release --locked --target x86_64-apple-darwin
+      - name: Package
+        run: |
+          lipo -create -output kutilang \
+            target/aarch64-apple-darwin/release/kutilang \
+            target/x86_64-apple-darwin/release/kutilang
+          scripts/package-macos.sh kutilang kutilang-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kutilang-macos
+          path: kutilang-macos.zip
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          # `v2.1.0-rc1` and the like are marked as pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
