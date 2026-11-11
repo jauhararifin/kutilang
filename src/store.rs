@@ -388,7 +388,7 @@ impl Store {
         }))
     }
 
-    /// Records a visit, written in Markdown.
+    /// Records a visit, written as plain text.
     pub fn add_visit(&self, patient_id: &str, date: NaiveDate, diagnosis: &str) -> Result<Visit> {
         check_diagnosis(diagnosis)?;
         let tx = self.conn.unchecked_transaction()?;
@@ -409,7 +409,7 @@ impl Store {
             patient_id: patient_id.to_string(),
             date: to_stored(date),
             diagnosis: diagnosis.to_string(),
-            format: DiagnosisFormat::Markdown,
+            format: DiagnosisFormat::Text,
         };
         tx.execute(
             "INSERT INTO visits
@@ -430,7 +430,7 @@ impl Store {
     }
 
     /// Changes a visit's date and, when `diagnosis` is given, its text (which
-    /// is then stored as Markdown). Leaving the text alone keeps a visit of
+    /// is then stored as plain text). Leaving the text alone keeps a visit of
     /// the original application in its original HTML.
     pub fn update_visit(
         &self,
@@ -448,7 +448,7 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         match diagnosis {
             Some(diagnosis) => tx.execute(
-                "UPDATE visits SET date = ?2, diagnosis = ?3, diagnosis_format = 'markdown', updated_at = ?4
+                "UPDATE visits SET date = ?2, diagnosis = ?3, diagnosis_format = 'text', updated_at = ?4
                  WHERE id = ?1",
                 params![id, date, diagnosis, now()],
             )?,
@@ -586,21 +586,81 @@ fn raise_last_visit(conn: &Connection, patient_id: &str, date: &str) -> Result<(
 // ============================================================================
 
 /// Schema version written by this app.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
-/// Steps from one schema version to the next: the version each step
-/// produces and its SQL. A database is brought up to date by running every
-/// step above its current version, in order.
-pub const UPGRADES: &[(i64, &str)] = &[(
-    3,
-    "CREATE TABLE settings (
-         key   TEXT PRIMARY KEY NOT NULL,
-         value TEXT NOT NULL
-     ) WITHOUT ROWID;",
-)];
+/// A step from one schema version to the next.
+type Upgrade = fn(&Connection) -> Result<()>;
 
-/// The tables of schema version 2, the first version of this app. Newer
-/// versions are reached through [`UPGRADES`].
+/// The schema steps: the version each step produces, and the step. A
+/// database is brought up to date by running every step above its current
+/// version, in order.
+const UPGRADES: &[(i64, Upgrade)] = &[(3, add_settings), (4, plain_text_visits)];
+
+/// Version 3: the settings (the template of new visits).
+fn add_settings(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE settings (
+             key   TEXT PRIMARY KEY NOT NULL,
+             value TEXT NOT NULL
+         ) WITHOUT ROWID;",
+    )?;
+    Ok(())
+}
+
+/// Version 4: visits are written as plain text instead of Markdown. Visits
+/// and the template written in Markdown by version 2 and 3 are converted.
+fn plain_text_visits(conn: &Connection) -> Result<()> {
+    let markdown_visits = conn
+        .prepare("SELECT id, diagnosis FROM visits WHERE diagnosis_format = 'markdown'")?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut update = conn.prepare("UPDATE visits SET diagnosis = ?2 WHERE id = ?1")?;
+    for (id, markdown) in markdown_visits {
+        update.execute(params![id, diagnosis::markdown_to_text(&markdown)])?;
+    }
+    let template: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [TEMPLATE_SETTING],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(template) = template {
+        conn.execute(
+            "UPDATE settings SET value = ?2 WHERE key = ?1",
+            params![TEMPLATE_SETTING, diagnosis::markdown_to_text(&template)],
+        )?;
+    }
+    // The format check cannot be changed in place.
+    conn.execute_batch(
+        "CREATE TABLE visits_v4 (
+             id               TEXT PRIMARY KEY NOT NULL,
+             patient_id       TEXT NOT NULL REFERENCES patients(id),
+             date             TEXT NOT NULL,
+             diagnosis        TEXT NOT NULL,
+             diagnosis_format TEXT NOT NULL CHECK (diagnosis_format IN ('html', 'text')),
+             is_deleted       INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+             created_at       TEXT,
+             updated_at       TEXT
+         );
+         INSERT INTO visits_v4
+             (id, patient_id, date, diagnosis, diagnosis_format, is_deleted, created_at, updated_at)
+         SELECT id, patient_id, date, diagnosis,
+                CASE diagnosis_format WHEN 'html' THEN 'html' ELSE 'text' END,
+                is_deleted, created_at, updated_at
+         FROM visits;
+         DROP TABLE visits;
+         ALTER TABLE visits_v4 RENAME TO visits;
+         CREATE INDEX visits_patient_idx ON visits(patient_id, is_deleted, date DESC, id DESC);",
+    )?;
+    Ok(())
+}
+
+/// The tables of schema version 2, the first version of this app (visits
+/// were then written in Markdown). Newer versions are reached through
+/// [`UPGRADES`].
 pub const CREATE_V2: &str = r#"
 CREATE TABLE meta (
     key   TEXT PRIMARY KEY NOT NULL,
@@ -709,9 +769,9 @@ pub fn upgrade(conn: &Connection, path: Option<&Path>) -> Result<Option<Migratio
 /// transaction together with the version it produces.
 fn apply_upgrades(conn: &Connection) -> Result<()> {
     let current = user_version(conn)?;
-    for &(version, sql) in UPGRADES.iter().filter(|(version, _)| *version > current) {
+    for &(version, upgrade) in UPGRADES.iter().filter(|(version, _)| *version > current) {
         let tx = conn.unchecked_transaction()?;
-        tx.execute_batch(sql).with_context(|| {
+        upgrade(&tx).with_context(|| {
             crate::pick(
                 format!("database tidak dapat diperbarui ke skema {version}"),
                 format!("cannot upgrade the database to schema {version}"),

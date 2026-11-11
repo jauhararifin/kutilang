@@ -37,22 +37,22 @@ pub struct Patient {
 pub enum DiagnosisFormat {
     /// Written with the rich text editor of the original app.
     Html,
-    /// Written with this app.
-    Markdown,
+    /// Plain text, written with this app.
+    Text,
 }
 
 impl DiagnosisFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             DiagnosisFormat::Html => "html",
-            DiagnosisFormat::Markdown => "markdown",
+            DiagnosisFormat::Text => "text",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "html" => Some(DiagnosisFormat::Html),
-            "markdown" => Some(DiagnosisFormat::Markdown),
+            "text" => Some(DiagnosisFormat::Text),
             _ => None,
         }
     }
@@ -396,12 +396,24 @@ pub fn format_with_weekday(date: NaiveDate) -> String {
 }
 
 pub fn format_with_weekday_in(language: Language, date: NaiveDate) -> String {
+    format!(
+        "{}, {}",
+        weekday_name_in(language, date),
+        format_long_in(language, date)
+    )
+}
+
+/// `Senin`.
+pub fn weekday_name(date: NaiveDate) -> &'static str {
+    weekday_name_in(language(), date)
+}
+
+fn weekday_name_in(language: Language, date: NaiveDate) -> &'static str {
     let index = date.weekday().num_days_from_monday() as usize;
-    let weekday = match language {
+    match language {
         Language::Indonesian => WEEKDAYS_ID[index],
         Language::English => WEEKDAYS_EN[index],
-    };
-    format!("{weekday}, {}", format_long_in(language, date))
+    }
 }
 
 /// `9 Nov 2026`: three-letter months (Agu and Des in Indonesian).

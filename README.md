@@ -54,13 +54,14 @@ understand the new schema. To go back, use the backup copy.
 
 ### Schema changes
 
-* `PRAGMA user_version` records the schema version (currently 3) and a `meta`
+* `PRAGMA user_version` records the schema version (currently 4) and a `meta`
   table where/when the database was migrated from. Later versions are reached
-  through small, ordered upgrade steps (`UPGRADES` in `src/store.rs`); version 3 added
-  the `settings` table.
+  through small, ordered upgrade steps (`UPGRADES` in `src/store.rs`): version
+  3 added the `settings` table; version 4 made visits plain text, converting
+  the visits and the template written in Markdown by versions 2 and 3.
 * Columns are `NOT NULL` with checks; rows carry `created_at`/`updated_at`.
 * `visits.diagnosis_format` is `html` (written with the old editor) or
-  `markdown` (written with v2). Old entries are kept byte for byte.
+  `text` (plain text, written with v2). Old entries are kept byte for byte.
 * `patient_keywords(keyword, patient_id)` replaces `patient_indices`. It no
   longer stores a copy of the last visit date, which in the old application
   went stale (adding a visit did not update it, editing a profile blanked it),
@@ -88,17 +89,22 @@ macOS, Ctrl on Windows and Linux).
   Siti whose head of family is Joko). Sort by most recent visit or by name.
   Arrow keys move through the list. The selected patient is shown in two
   columns: their details above the list of all their visits (how many, when,
-  and a one-line summary of each), and next to it the selected visit's
-  diagnosis (Print, Edit, Delete).
-  **New Visit** (Kunjungan Baru) opens the editor, filled with the template.
+  and a one-line summary of each), and next to it the selected visit.
+  A visit is shown the way a text editor shows a document: its date and its
+  text can be changed in place. Once something changed, **Save** (or
+  Cmd/Ctrl-S) stores it and **Cancel** puts it back; otherwise the visit
+  offers Print and Delete. **New Visit** (Kunjungan Baru) opens the same
+  editor, filled with the template. Leaving a visit with unsaved changes
+  (another visit or patient, closing the database, quitting) asks first.
 * **New patient**: the person icon above the list, or Cmd/Ctrl-N.
 * **Visits** (Cmd/Ctrl-2): the history of every visit of every patient, newest
   first, grouped by day, each with a one-line summary. Filter by patient name
   and by dates (Today, Last 7 days, Last 30 days, This month, This year, or any
-  range). **Open Patient** jumps to the patient.
+  range). The selected visit is shown in the same editor as in Patients;
+  **Open Patient** jumps to the patient.
 * **Settings** (Cmd/Ctrl-,): the language; backup, restore and export; the template new
-  entries start from, edited in Markdown with a live preview (**Reset to
-  Default** brings back the original template); which database file is open.
+  visits start from (**Reset to Default** brings back the original template);
+  which database file is open.
 * **Back Up…** (File menu or Settings): saves a copy of everything (patients,
   visits, settings) to a file of your choice. It is an ordinary SQLite file.
 * **Restore…**: replaces everything with a backup, after showing how many
@@ -113,12 +119,13 @@ macOS, Ctrl on Windows and Linux).
 
 Differences from the original application:
 
-* **Diagnosis editor.** GPUI has no WYSIWYG rich text editor, so entries are
-  written in Markdown (`**bold**`, `- item`, `1. item`) with a Bold button and
-  a Preview toggle; every line break typed is kept. Old entries are displayed
-  from their HTML as they were. When an old entry is edited, its text is shown
-  converted to Markdown; if only the date is changed, the original HTML is
-  kept.
+* **Plain text diagnoses.** Visits are written and shown as plain text, with
+  every line break kept; the template uses `- ` and `1. ` for its lists. The
+  formatting of the old editor carried almost no meaning (see
+  `docs/diagnosis-formatting-analysis.md`), so old visits are shown, printed
+  and exported as plain text too: one line per paragraph or list item, a
+  blank line before each section. Their HTML stays in the database, untouched
+  unless their text is edited (changing only the date keeps it).
 * **Search** narrows as you type and ignores punctuation (`Ma'ruf` is found
   with `maruf`). The original only searched on Enter, for whole words, and
   listed patients matching any of the words.
@@ -145,7 +152,7 @@ cargo clippy --all-targets
 Checks against a real database (not part of the repository):
 
 ```sh
-# every old entry converts to Markdown without losing text or bold
+# every old visit reads as plain text with all of its text, in order
 KUTILANG_REAL_DB=/path/to/copy.sqlite3 cargo test --test store real_data -- --ignored
 # render the main screens to PNG files (writes to the database: use a copy)
 cargo run --example screenshot -- /path/to/copy.sqlite3 /tmp/shots nur
@@ -157,7 +164,7 @@ Layout, a few long files, each split into titled sections:
   keywords, recent databases.
 * `src/store.rs`: SQLite (schema, migration of the original database,
   patients, visits, settings), backup and restore, the Excel export.
-* `src/diagnosis.rs`: the visit template, HTML to Markdown, summaries,
+* `src/diagnosis.rs`: the visit template, HTML to plain text, summaries,
   printing.
 * `src/ui.rs`: every GPUI view (shell and database picker, main window,
   Patients, Visits, Settings, the visit editor, the profile form, icons).

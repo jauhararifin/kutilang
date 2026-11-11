@@ -162,16 +162,16 @@ fn main() {
                 capture(window, &out, "03-patient", cx).await;
 
                 // A new entry, written through the composer.
-                let markdown_entries = |store: &Store| {
+                let text_entries = |store: &Store| {
                     store
                         .list_visits(&patient.id, None, 100)
                         .unwrap()
                         .items
                         .iter()
-                        .filter(|v| v.format == DiagnosisFormat::Markdown)
+                        .filter(|v| v.format == DiagnosisFormat::Text)
                         .count()
                 };
-                let before = markdown_entries(&check);
+                let before = text_entries(&check);
                 update(window, &app, cx, |app, window, cx| {
                     let detail = app.patients().read(cx).detail().unwrap().clone();
                     detail.update(cx, |d, cx| d.open_composer(window, cx));
@@ -179,11 +179,11 @@ fn main() {
                 capture(window, &out, "04-new-entry", cx).await;
                 update(window, &app, cx, |app, window, cx| {
                     let detail = app.patients().read(cx).detail().unwrap().clone();
-                    let composer = detail.read(cx).composer().unwrap().clone();
+                    let composer = detail.read(cx).composer(cx).unwrap();
                     composer.update(cx, |c, cx| c.submit(window, cx));
                 });
                 settle(cx).await;
-                assert_eq!(markdown_entries(&check), before + 1, "new entry stored");
+                assert_eq!(text_entries(&check), before + 1, "new entry stored");
                 let (selected, first) = window
                     .update(cx, |_, _, cx| {
                         let detail = app.read(cx).patients().read(cx).detail().unwrap().clone();
@@ -201,33 +201,84 @@ fn main() {
                 );
                 println!("ok: a new entry is stored, listed first and shown");
 
-                // Editing an old entry; saving it untouched keeps its HTML.
+                // An old visit: changing only its date keeps its HTML.
                 let old = check
                     .list_visits(&patient.id, None, 100)
                     .unwrap()
                     .items
                     .into_iter()
                     .find(|v| v.format == DiagnosisFormat::Html)
-                    .expect("an entry of the original application");
+                    .expect("a visit of the original application");
                 let old_id = old.id.clone();
                 update(window, &app, cx, move |app, window, cx| {
                     let detail = app.patients().read(cx).detail().unwrap().clone();
-                    detail.update(cx, |d, cx| d.edit_entry(&old_id, window, cx));
+                    detail.update(cx, |d, cx| d.select_visit(&old_id, window, cx));
                 });
-                capture(window, &out, "05-edit-old-entry", cx).await;
+                capture(window, &out, "05-old-visit", cx).await;
+                let new_date = kutilangv2::parse_stored(&old.date).unwrap() + chrono::Days::new(1);
                 let old_id = old.id.clone();
-                update(window, &app, cx, move |app, window, cx| {
-                    let detail = app.patients().read(cx).detail().unwrap().clone();
-                    let editor = detail.read(cx).entry_editor(&old_id).unwrap();
-                    editor.update(cx, |e, cx| e.submit(window, cx));
-                });
+                let editor = window
+                    .update(cx, |_, _, cx| {
+                        let detail = app.read(cx).patients().read(cx).detail().unwrap().clone();
+                        detail
+                            .read(cx)
+                            .entry_editor(&old_id, cx)
+                            .expect("shown in the editor")
+                    })
+                    .unwrap();
+                window
+                    .update(cx, |_, window, cx| {
+                        editor.update(cx, |e, cx| {
+                            e.set_date(new_date, window, cx);
+                            assert!(e.has_changes(cx), "a new date is a change");
+                            e.submit(window, cx);
+                        })
+                    })
+                    .unwrap();
                 settle(cx).await;
                 let after = check.get_visit(&old.id).unwrap().unwrap();
                 assert_eq!(
-                    (after.format, &after.diagnosis),
-                    (DiagnosisFormat::Html, &old.diagnosis)
+                    (after.format, &after.diagnosis, after.date.as_str()),
+                    (
+                        DiagnosisFormat::Html,
+                        &old.diagnosis,
+                        kutilangv2::to_stored(new_date).as_str()
+                    )
                 );
-                println!("ok: an old entry saved without changes keeps its HTML");
+                println!("ok: an old visit whose date changed keeps its HTML");
+
+                // Typing in the visit and pressing Cmd/Ctrl-S saves it as text.
+                window
+                    .update(cx, |_, window, cx| {
+                        editor.update(cx, |e, cx| e.focus(window, cx))
+                    })
+                    .unwrap();
+                draw(window, cx);
+                window
+                    .update(cx, |_, window, cx| {
+                        window.dispatch_keystroke(gpui_kit::Keystroke::parse("x").unwrap(), cx);
+                    })
+                    .unwrap();
+                settle(cx).await;
+                capture(window, &out, "05b-changed-visit", cx).await;
+                window
+                    .update(cx, |_, window, cx| {
+                        window.dispatch_action(Box::new(ui::SaveVisit), cx)
+                    })
+                    .unwrap();
+                settle(cx).await;
+                let after = check.get_visit(&old.id).unwrap().unwrap();
+                assert_eq!(
+                    after.format,
+                    DiagnosisFormat::Text,
+                    "an edited old visit is text"
+                );
+                assert!(after.diagnosis.contains('x'));
+                let saved = window
+                    .update(cx, |_, _, cx| !editor.read(cx).has_changes(cx))
+                    .unwrap();
+                assert!(saved, "after saving, nothing is left to save");
+                println!("ok: typing in a visit and pressing Cmd/Ctrl-S saves it as text");
 
                 // The history of every visit.
                 update(window, &app, cx, |app, window, cx| {
@@ -268,19 +319,19 @@ fn main() {
                 println!("ok: the Settings shortcut opens the settings");
                 capture(window, &out, "08-settings", cx).await;
                 check
-                    .set_diagnosis_template(Some("**Keluhan**: \n\n**Terapi**: \n"))
+                    .set_diagnosis_template(Some("Keluhan: \nTerapi: \n"))
                     .unwrap();
                 let composer_text = window
                     .update(cx, |_, window, cx| {
                         app.update(cx, |app, cx| app.open_patient(&patient.id, window, cx));
                         let detail = app.read(cx).patients().read(cx).detail().unwrap().clone();
                         detail.update(cx, |d, cx| d.open_composer(window, cx));
-                        let composer = detail.read(cx).composer().unwrap().clone();
+                        let composer = detail.read(cx).composer(cx).unwrap();
                         composer.read(cx).content(cx).to_string()
                     })
                     .unwrap();
                 check.set_diagnosis_template(None).unwrap();
-                assert_eq!(composer_text, "**Keluhan**: \n\n**Terapi**: \n");
+                assert_eq!(composer_text, "Keluhan: \nTerapi: \n");
                 println!("ok: the composer starts from the saved template");
 
                 // Backup and restore: a patient added after the backup is gone

@@ -231,12 +231,12 @@ fn patients_and_visits_round_trip() {
 
     // Visits, newest first; an older visit does not move last_visit back.
     let v1 = store
-        .add_visit(&patient.id, date(2026, 11, 10), "**KU**: baik")
+        .add_visit(&patient.id, date(2026, 11, 10), "KU: baik")
         .unwrap();
     let v2 = store
         .add_visit(&patient.id, date(2026, 1, 1), "lama")
         .unwrap();
-    assert_eq!(v1.format, DiagnosisFormat::Markdown);
+    assert_eq!(v1.format, DiagnosisFormat::Text);
     let visits = store.list_visits(&patient.id, None, 30).unwrap();
     assert_eq!(
         visits
@@ -431,9 +431,9 @@ fn migrates_the_go_database() {
         (HTML_A1, DiagnosisFormat::Html)
     );
     let edited = store
-        .update_visit("v1", date(2021, 8, 24), Some("**KU**: lemas"))
+        .update_visit("v1", date(2021, 8, 24), Some("KU: lemas"))
         .unwrap();
-    assert_eq!(edited.format, DiagnosisFormat::Markdown);
+    assert_eq!(edited.format, DiagnosisFormat::Text);
 
     // Reopening does not migrate again.
     drop(store);
@@ -530,14 +530,10 @@ fn lists_every_visit_with_filters() {
         .create_patient(&profile("Budi", ""), date(2026, 1, 1))
         .unwrap();
     store
-        .add_visit(&siti.id, date(2026, 11, 1), "**KU**: demam\n**RPS**: \n")
+        .add_visit(&siti.id, date(2026, 11, 1), "KU: demam\nRPS: \n")
         .unwrap();
     store
-        .add_visit(
-            &budi.id,
-            date(2026, 11, 5),
-            "##### Subjektif\n\n**KU**: batuk",
-        )
+        .add_visit(&budi.id, date(2026, 11, 5), "Subjektif\nKU: batuk")
         .unwrap();
     let gone = store
         .add_visit(&budi.id, date(2026, 11, 6), "hidden")
@@ -578,14 +574,12 @@ fn entry_template_can_be_set_up() {
     assert_eq!(store.diagnosis_template(), TEMPLATE);
     assert!(!store.has_custom_template());
 
-    store
-        .set_diagnosis_template(Some("**Keluhan**: \n"))
-        .unwrap();
+    store.set_diagnosis_template(Some("Keluhan: \n")).unwrap();
     drop(store);
     let (store, _) = Store::open(&path).unwrap();
     assert_eq!(
         store.diagnosis_template(),
-        "**Keluhan**: \n",
+        "Keluhan: \n",
         "kept across restarts"
     );
     assert!(store.has_custom_template());
@@ -596,6 +590,48 @@ fn entry_template_can_be_set_up() {
     store.set_diagnosis_template(Some("x")).unwrap();
     store.set_diagnosis_template(None).unwrap();
     assert_eq!(store.diagnosis_template(), TEMPLATE);
+}
+
+#[test]
+fn turns_markdown_visits_into_plain_text() {
+    // A database of the previous release (schema 3): visits in Markdown.
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(kutilangv2::store::CREATE_V2).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID;
+         INSERT INTO patients (id, name, birth_date, last_visit) VALUES ('p', 'Siti', '1980-01-01', '2026-11-01');
+         INSERT INTO visits (id, patient_id, date, diagnosis, diagnosis_format)
+         VALUES ('md', 'p', '2026-11-01', '##### Subjektif\n\n**KU**: lemas\n\n- **TD**: 120/80', 'markdown'),
+                ('old', 'p', '2021-08-23', '<p><strong>KU</strong>: baik</p>', 'html');
+         INSERT INTO settings (key, value) VALUES ('diagnosis_template', '**Keluhan**: \n');
+         PRAGMA user_version = 3;",
+    )
+    .unwrap();
+
+    let (store, report) = Store::from_connection(conn).unwrap();
+    assert!(report.is_none());
+    assert_eq!(user_version(store.connection()), SCHEMA_VERSION);
+    let md = store.get_visit("md").unwrap().unwrap();
+    assert_eq!(md.format, DiagnosisFormat::Text);
+    assert_eq!(md.diagnosis, "Subjektif\n\nKU: lemas\n\n- TD: 120/80");
+    let old = store.get_visit("old").unwrap().unwrap();
+    assert_eq!(
+        (old.format, old.diagnosis.as_str()),
+        (DiagnosisFormat::Html, "<p><strong>KU</strong>: baik</p>"),
+        "visits of the original application keep their HTML"
+    );
+    assert_eq!(store.diagnosis_template(), "Keluhan: \n");
+    assert_eq!(store.list_visits("p", None, 10).unwrap().items.len(), 2);
+    assert!(
+        store
+            .connection()
+            .execute(
+                "UPDATE visits SET diagnosis_format = 'markdown' WHERE id = 'md'",
+                []
+            )
+            .is_err(),
+        "only html and text remain"
+    );
 }
 
 #[test]
@@ -627,11 +663,9 @@ fn backs_up_and_restores_everything() {
         .create_patient(&profile("Siti", "Joko"), date(2026, 1, 1))
         .unwrap();
     store
-        .add_visit(&siti.id, date(2026, 11, 1), "**KU**: demam")
+        .add_visit(&siti.id, date(2026, 11, 1), "KU: demam")
         .unwrap();
-    store
-        .set_diagnosis_template(Some("**Keluhan**: \n"))
-        .unwrap();
+    store.set_diagnosis_template(Some("Keluhan: \n")).unwrap();
 
     let backup = dir.path().join("backup.sqlite3");
     std::fs::write(&backup, b"an older file").unwrap();
@@ -661,7 +695,7 @@ fn backs_up_and_restores_everything() {
             .len(),
         1
     );
-    assert_eq!(store.diagnosis_template(), "**Keluhan**: \n");
+    assert_eq!(store.diagnosis_template(), "Keluhan: \n");
     let restored_from: String = store
         .connection()
         .query_row(
@@ -785,11 +819,7 @@ fn exports_patients_and_visits_to_excel() {
         .create_patient(&profile("Siti", "Joko"), date(2026, 1, 1))
         .unwrap();
     store
-        .add_visit(
-            &siti.id,
-            date(2026, 11, 1),
-            "##### Subjektif\n\n**KU**: demam",
-        )
+        .add_visit(&siti.id, date(2026, 11, 1), "Subjektif\nKU: demam")
         .unwrap();
     store
         .add_visit(&siti.id, date(8, 1, 29), "tanggal salah ketik")
@@ -818,48 +848,68 @@ fn exports_patients_and_visits_to_excel() {
 mod real_data {
     use html5ever::tendril::TendrilSink as _;
     use html5ever::{ParseOpts, parse_document};
-    use kutilangv2::diagnosis::{html_to_markdown, with_line_breaks};
+    use kutilangv2::diagnosis::html_to_text;
     use markup5ever_rcdom::{Handle, NodeData, RcDom};
     use rusqlite::{Connection, OpenFlags};
 
-    /// Non-whitespace text of an HTML fragment, and the part of it that is bold.
-    fn text_and_bold(html: &str) -> (String, String) {
-        fn walk(node: &Handle, bold: bool, text: &mut String, bold_text: &mut String) {
+    /// The text of an HTML fragment without whitespace, read by a full HTML
+    /// parser, with the list markers the conversion writes (`-`, `2.`).
+    fn text_of(html: &str) -> String {
+        fn walk(node: &Handle, text: &mut String) {
             match &node.data {
                 NodeData::Text { contents } => {
-                    for c in contents.borrow().chars().filter(|c| !c.is_whitespace()) {
-                        text.push(c);
-                        if bold {
-                            bold_text.push(c);
-                        }
-                    }
+                    text.extend(contents.borrow().chars().filter(|c| !c.is_whitespace()))
                 }
-                NodeData::Element { name, .. } => {
-                    let tag = name.local.as_ref();
-                    if tag == "script" || tag == "style" {
-                        return;
-                    }
-                    let bold = bold || tag == "strong" || tag == "b";
+                NodeData::Element { name, .. }
+                    if matches!(name.local.as_ref(), "script" | "style") => {}
+                NodeData::Element { name, .. } if name.local.as_ref() == "li" => {
+                    text.push_str(&marker(node));
                     for child in node.children.borrow().iter() {
-                        walk(child, bold, text, bold_text);
+                        walk(child, text);
                     }
                 }
                 _ => {
                     for child in node.children.borrow().iter() {
-                        walk(child, bold, text, bold_text);
+                        walk(child, text);
                     }
                 }
             }
         }
         let dom = parse_document(RcDom::default(), ParseOpts::default()).one(html);
-        let (mut text, mut bold) = (String::new(), String::new());
-        walk(&dom.document, false, &mut text, &mut bold);
-        (text, bold)
+        let mut text = String::new();
+        walk(&dom.document, &mut text);
+        text
+    }
+
+    fn name(node: &Handle) -> Option<String> {
+        match &node.data {
+            NodeData::Element { name, .. } => Some(name.local.to_string()),
+            _ => None,
+        }
+    }
+
+    /// `-` in a bulleted list, the item's number in a numbered one.
+    fn marker(item: &Handle) -> String {
+        let parent = item.parent.take();
+        item.parent.set(parent.clone());
+        let Some(parent) = parent.and_then(|parent| parent.upgrade()) else {
+            return "-".into();
+        };
+        if name(&parent).as_deref() != Some("ol") {
+            return "-".into();
+        }
+        let siblings = parent.children.borrow();
+        let number = siblings
+            .iter()
+            .filter(|child| name(child).as_deref() == Some("li"))
+            .position(|child| std::rc::Rc::ptr_eq(child, item))
+            .map_or(1, |index| index + 1);
+        format!("{number}.")
     }
 
     #[test]
     #[ignore = "needs KUTILANG_REAL_DB"]
-    fn every_old_entry_converts_without_losing_text_or_bold() {
+    fn every_old_visit_keeps_its_text() {
         let path = std::env::var("KUTILANG_REAL_DB").expect("KUTILANG_REAL_DB");
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let migrated: bool = conn
@@ -882,24 +932,22 @@ mod real_data {
             .unwrap();
         assert!(!rows.is_empty());
 
+        // The same text, in the same order, with the same list markers;
+        // nothing of the markup is left.
         let mut failures = Vec::new();
         for (id, html) in &rows {
-            let markdown = html_to_markdown(html);
-            let rendered = markdown::to_html_with_options(
-                &with_line_breaks(&markdown),
-                &markdown::Options::gfm(),
-            )
-            .unwrap();
-            let (text, bold) = text_and_bold(html);
-            let (new_text, new_bold) = text_and_bold(&rendered);
-            if text != new_text || bold != new_bold {
+            let text: String = html_to_text(html)
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            if text != text_of(html) {
                 failures.push(id.clone());
             }
         }
-        println!("checked {} entries, {} differ", rows.len(), failures.len());
+        println!("checked {} visits, {} differ", rows.len(), failures.len());
         assert!(
             failures.is_empty(),
-            "entries that differ: {:?}",
+            "visits that differ: {:?}",
             &failures[..failures.len().min(20)]
         );
     }

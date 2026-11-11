@@ -3955,7 +3955,6 @@ dependencies = [
  "gpui-kit",
  "html5ever",
  "image",
- "markdown",
  "markup5ever_rcdom",
  "proptest 0.10.1",
  "rusqlite",

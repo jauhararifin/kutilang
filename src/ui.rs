@@ -9,7 +9,7 @@ use crate::{
     PatientProfile, RecentDatabases, Visit, VisitSummary, age_years, app_dir, default_database,
     diagnosis, display_with_age, display_with_relative, format_age, format_age_short,
     format_relative, format_short, format_with_weekday, language, load_preference, parse_stored,
-    pick, save_preference, set_language, store, t, to_stored, today,
+    pick, save_preference, set_language, store, t, to_stored, today, weekday_name,
 };
 use chrono::{Datelike as _, Days, NaiveDate};
 use gpui_kit::assets::IconName;
@@ -28,7 +28,6 @@ use gpui_kit::component::list::{List, ListDelegate, ListEvent, ListItem, ListSta
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem};
-use gpui_kit::component::text::TextView;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IndexPath, Selectable as _, Sizable as _, Theme,
     TitleBar, WindowExt as _, h_flex, h_resizable, resizable_panel, v_flex,
@@ -38,7 +37,7 @@ use gpui_kit::{
     AnyElement, App, AssetSource, Bounds, Context, Div, Entity, EventEmitter, FocusHandle,
     FontWeight, KeyBinding, Menu, MenuItem, PathPromptOptions, Result, SharedString, Subscription,
     Task, TitlebarOptions, WeakEntity, Window, WindowAppearance, WindowBounds, WindowOptions, div,
-    px, size,
+    px, relative, size,
 };
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -61,7 +60,8 @@ gpui_kit::actions!(
         RestoreBackup,
         ExportToExcel,
         OpenDatabase,
-        CloseDatabase
+        CloseDatabase,
+        SaveVisit
     ]
 );
 
@@ -109,6 +109,7 @@ pub fn init(cx: &mut App) {
                 KeyBinding::new(concat!($modifier, "-,"), ShowSettings, None),
                 KeyBinding::new(concat!($modifier, "-n"), NewPatient, None),
                 KeyBinding::new(concat!($modifier, "-o"), OpenDatabase, None),
+                KeyBinding::new(concat!($modifier, "-s"), SaveVisit, None),
             ]
         };
     }
@@ -157,6 +158,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(t("Tutup Database", "Close Database"), CloseDatabase),
             MenuItem::separator(),
             MenuItem::action(t("Pasien Baru…", "New Patient…"), NewPatient),
+            MenuItem::action(t("Simpan Kunjungan", "Save Visit"), SaveVisit),
             MenuItem::separator(),
             MenuItem::action(t("Cadangkan…", "Back Up…"), BackUp),
             MenuItem::action(t("Pulihkan…", "Restore…"), RestoreBackup),
@@ -815,6 +817,8 @@ pub struct KutilangApp {
     visit_count: usize,
     /// Visits changed since the Visits section was last shown.
     visits_stale: bool,
+    /// Visits changed in the Visits section since Patients was last shown.
+    patients_stale: bool,
     /// Subscriptions to the Patients and Visits views.
     record_subscriptions: Vec<Subscription>,
     _subscriptions: Vec<Subscription>,
@@ -838,6 +842,11 @@ fn record_views(
         }),
         cx.subscribe_in(&visits, window, |this, _, event, window, cx| match event {
             VisitsEvent::OpenPatient(id) => this.open_patient(id, window, cx),
+            VisitsEvent::Changed => {
+                this.patients_stale = true;
+                this.refresh_counts();
+                cx.notify();
+            }
         }),
     ];
     (patients, visits, subscriptions)
@@ -879,6 +888,7 @@ impl KutilangApp {
             patient_count: 0,
             visit_count: 0,
             visits_stale: false,
+            patients_stale: false,
             record_subscriptions,
             _subscriptions: subscriptions,
         };
@@ -919,6 +929,7 @@ impl KutilangApp {
     /// template.
     pub fn has_unsaved_changes(&self, cx: &App) -> bool {
         self.patients.read(cx).has_unsaved_changes(cx)
+            || self.visits.read(cx).has_unsaved_changes(cx)
             || self.settings.read(cx).has_unsaved_changes(cx)
     }
 
@@ -936,6 +947,7 @@ impl KutilangApp {
         self.visits = visits;
         self.record_subscriptions = subscriptions;
         self.visits_stale = false;
+        self.patients_stale = false;
         self.refresh_counts();
         cx.notify();
     }
@@ -948,7 +960,15 @@ impl KutilangApp {
     pub fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.section = section;
         match section {
-            Section::Patients => self.patients.update(cx, |p, cx| p.focus_search(window, cx)),
+            Section::Patients => {
+                let stale = std::mem::take(&mut self.patients_stale);
+                self.patients.update(cx, |patients, cx| {
+                    if stale {
+                        patients.refresh(window, cx);
+                    }
+                    patients.focus_search(window, cx);
+                });
+            }
             Section::Visits => {
                 let stale = std::mem::take(&mut self.visits_stale);
                 self.visits.update(cx, |visits, cx| {
@@ -966,8 +986,13 @@ impl KutilangApp {
     /// Shows a patient in the Patients section.
     pub fn open_patient(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.section = Section::Patients;
-        self.patients
-            .update(cx, |patients, cx| patients.select_patient(id, window, cx));
+        let stale = std::mem::take(&mut self.patients_stale);
+        self.patients.update(cx, |patients, cx| {
+            if stale {
+                patients.refresh(window, cx);
+            }
+            patients.select_patient(id, window, cx)
+        });
         cx.notify();
     }
 
@@ -1396,6 +1421,14 @@ impl PatientsView {
         });
     }
 
+    /// Shows the latest data after visits changed elsewhere.
+    pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reload_list(window, cx);
+        if let Some(detail) = self.detail.clone() {
+            detail.update(cx, |detail, cx| detail.refresh(window, cx));
+        }
+    }
+
     /// Reloads the list after a change, keeping the selected patient.
     fn reload_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.list.update(cx, |list, cx| {
@@ -1763,12 +1796,10 @@ pub struct PatientDetail {
     patient: Option<Patient>,
     visit_count: usize,
     visits: Entity<ListState<PatientVisitList>>,
-    /// The visit shown on the right.
+    /// The visit selected in the list.
     selected: Option<String>,
-    /// The editor of a new entry, while one is being written.
-    composer: Option<(Entity<VisitEditor>, Subscription)>,
-    /// The editor of the selected visit, while it is being edited.
-    editor: Option<(String, Entity<VisitEditor>, Subscription)>,
+    /// The editor on the right: of the selected visit, or of a new one.
+    editor: Option<(Entity<VisitEditor>, Subscription)>,
     profile_subscription: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
@@ -1790,14 +1821,8 @@ impl PatientDetail {
             error: None,
         };
         delegate.reload();
-        let selected = delegate.rows.first().map(|row| row.visit.id.clone());
-        let visits = cx.new(|cx| {
-            let mut list = ListState::new(delegate, window, cx);
-            if selected.is_some() {
-                list.set_selected_index(Some(IndexPath::new(0)), window, cx);
-            }
-            list
-        });
+        let newest = delegate.rows.first().map(|row| row.visit.id.clone());
+        let visits = cx.new(|cx| ListState::new(delegate, window, cx));
         let subscription =
             cx.subscribe_in(
                 &visits,
@@ -1824,13 +1849,15 @@ impl PatientDetail {
             patient: None,
             visit_count: 0,
             visits,
-            selected,
-            composer: None,
+            selected: None,
             editor: None,
             profile_subscription: None,
             _subscriptions: vec![subscription],
         };
         detail.reload_patient(window, cx);
+        if let Some(newest) = newest {
+            detail.select_visit(&newest, window, cx);
+        }
         detail
     }
 
@@ -1849,22 +1876,28 @@ impl PatientDetail {
             .collect()
     }
 
-    /// The visit shown on the right.
+    /// The visit selected in the list.
     pub fn selected_visit(&self) -> Option<&str> {
         self.selected.as_deref()
     }
 
-    /// The open editor of a visit.
-    pub fn entry_editor(&self, id: &str) -> Option<Entity<VisitEditor>> {
-        self.editor
-            .as_ref()
-            .filter(|(editing, _, _)| editing == id)
-            .map(|(_, editor, _)| editor.clone())
+    /// The editor on the right.
+    pub fn editor(&self) -> Option<&Entity<VisitEditor>> {
+        self.editor.as_ref().map(|(editor, _)| editor)
     }
 
-    /// The editor of the new entry, when open.
-    pub fn composer(&self) -> Option<&Entity<VisitEditor>> {
-        self.composer.as_ref().map(|(composer, _)| composer)
+    /// The editor of a visit, when it is the one shown.
+    pub fn entry_editor(&self, id: &str, cx: &App) -> Option<Entity<VisitEditor>> {
+        self.editor()
+            .filter(|editor| editor.read(cx).visit_id() == Some(id))
+            .cloned()
+    }
+
+    /// The editor of a new visit, when one is being written.
+    pub fn composer(&self, cx: &App) -> Option<Entity<VisitEditor>> {
+        self.editor()
+            .filter(|editor| editor.read(cx).is_new())
+            .cloned()
     }
 
     fn notify_error(window: &mut Window, error: impl ToString, cx: &mut Context<Self>) {
@@ -1883,7 +1916,8 @@ impl PatientDetail {
         cx.notify();
     }
 
-    /// Reloads the visits after a change and shows `select` (or the newest).
+    /// Reloads the visits after a change and selects `select` (or the
+    /// newest). The editor stays when it shows that visit, or a new one.
     fn reload_visits(&mut self, select: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         let selected = self.visits.update(cx, |list, cx| {
             list.delegate_mut().reload();
@@ -1899,26 +1933,40 @@ impl PatientDetail {
             cx.notify();
             id
         });
-        self.selected = selected;
+        self.selected = selected.clone();
+        let keep = self.editor().is_some_and(|editor| {
+            let editor = editor.read(cx);
+            editor.is_new() || editor.visit_id() == selected.as_deref()
+        });
+        if !keep {
+            self.open_selected(window, cx);
+        }
         self.reload_patient(window, cx);
     }
 
-    /// Whether a visit being written or edited is not saved.
+    /// Shows the latest data after it was changed elsewhere (the Visits
+    /// section), keeping text that is being written.
+    pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.has_unsaved_changes(cx) {
+            self.editor = None;
+        }
+        let selected = self.selected.clone();
+        self.reload_visits(selected.as_deref(), window, cx);
+    }
+
+    /// Whether the visit on the right was changed and not saved.
     pub fn has_unsaved_changes(&self, cx: &App) -> bool {
-        self.composer
-            .as_ref()
-            .is_some_and(|(composer, _)| composer.read(cx).has_changes(cx))
-            || self
-                .editor
-                .as_ref()
-                .is_some_and(|(_, editor, _)| editor.read(cx).has_changes(cx))
+        self.editor()
+            .is_some_and(|editor| editor.read(cx).has_changes(cx))
     }
 
     /// Shows the visit chosen in the list, asking first when that would lose
-    /// a visit being written.
+    /// changes that are not saved.
     fn request_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let editing_it = self.composer.is_none() && self.entry_editor(id).is_some();
-        if editing_it || !self.has_unsaved_changes(cx) {
+        if self.entry_editor(id, cx).is_some() {
+            return;
+        }
+        if !self.has_unsaved_changes(cx) {
             self.select_visit(id, window, cx);
             return;
         }
@@ -1934,28 +1982,68 @@ impl PatientDetail {
         });
     }
 
-    /// Shows a visit on the right, closing the editors.
+    /// Selects a visit and shows it in the editor, dropping changes that are
+    /// not saved.
     pub fn select_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.composer = None;
-        if self
-            .editor
-            .as_ref()
-            .is_some_and(|(editing, _, _)| editing != id)
-        {
-            self.editor = None;
-        }
         self.selected = Some(id.to_string());
         self.visits.update(cx, |list, cx| {
             let row = list.delegate().position(id);
             list.set_selected_index(row.map(IndexPath::new), window, cx);
         });
+        if self.entry_editor(id, cx).is_none() {
+            self.open_selected(window, cx);
+        }
         cx.notify();
     }
 
-    // New entry -------------------------------------------------------------
+    /// Opens the selected visit in the editor.
+    fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let visit = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.visits.read(cx).delegate().visit(id))
+            .cloned();
+        match visit {
+            Some(visit) => {
+                let editor = cx.new(|cx| VisitEditor::open(&visit, window, cx));
+                self.set_editor(editor, window, cx);
+            }
+            None => self.editor = None,
+        }
+        cx.notify();
+    }
+
+    fn set_editor(
+        &mut self,
+        editor: Entity<VisitEditor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let subscription = cx.subscribe_in(&editor, window, |this, editor, event, window, cx| {
+            let visit_id = editor.read(cx).visit_id().map(str::to_string);
+            match (event, visit_id) {
+                (VisitEditorEvent::Submit { date, diagnosis }, None) => {
+                    if let Some(diagnosis) = diagnosis {
+                        this.add_visit(*date, diagnosis, window, cx);
+                    }
+                }
+                (VisitEditorEvent::Submit { date, diagnosis }, Some(id)) => {
+                    this.save_visit(&id, editor, *date, diagnosis.as_deref(), window, cx)
+                }
+                (VisitEditorEvent::Cancel, _) => this.close_composer(window, cx),
+                (VisitEditorEvent::Print, Some(_)) => this.print(editor, window, cx),
+                (VisitEditorEvent::Delete, Some(id)) => this.confirm_delete_entry(id, window, cx),
+                (VisitEditorEvent::Print | VisitEditorEvent::Delete, None) => {}
+            }
+        });
+        self.editor = Some((editor, subscription));
+    }
+
+    // A new visit -----------------------------------------------------------
 
     pub fn open_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer.is_some() {
+        if let Some(composer) = self.composer(cx) {
+            composer.update(cx, |composer, cx| composer.focus(window, cx));
             return;
         }
         if self.has_unsaved_changes(cx) {
@@ -1965,33 +2053,20 @@ impl PatientDetail {
             });
             return;
         }
-        self.editor = None;
         let template = self.store.diagnosis_template();
-        let composer = cx.new(|cx| VisitEditor::new_entry(template, window, cx));
-        let subscription =
-            cx.subscribe_in(
-                &composer,
-                window,
-                |this, _, event, window, cx| match event {
-                    VisitEditorEvent::Submit {
-                        date,
-                        diagnosis: Some(diagnosis),
-                    } => this.add_entry(*date, diagnosis, window, cx),
-                    VisitEditorEvent::Submit {
-                        diagnosis: None, ..
-                    } => {}
-                    VisitEditorEvent::Cancel => {
-                        this.composer = None;
-                        cx.notify();
-                    }
-                },
-            );
+        let composer = cx.new(|cx| VisitEditor::new_visit(template, window, cx));
         composer.update(cx, |composer, cx| composer.focus(window, cx));
-        self.composer = Some((composer, subscription));
+        self.set_editor(composer, window, cx);
         cx.notify();
     }
 
-    fn add_entry(
+    /// Leaves the new visit and shows the selected one again.
+    fn close_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor = None;
+        self.open_selected(window, cx);
+    }
+
+    fn add_visit(
         &mut self,
         date: NaiveDate,
         diagnosis: &str,
@@ -2000,8 +2075,12 @@ impl PatientDetail {
     ) {
         match self.store.add_visit(&self.patient_id, date, diagnosis) {
             Ok(visit) => {
-                self.composer = None;
+                self.editor = None;
                 self.reload_visits(Some(&visit.id), window, cx);
+                // Keep writing where the text was.
+                if let Some(editor) = self.editor().cloned() {
+                    editor.update(cx, |editor, cx| editor.focus(window, cx));
+                }
                 window.push_notification(
                     Notification::success(t("Kunjungan ditambahkan", "Visit added")),
                     cx,
@@ -2013,60 +2092,23 @@ impl PatientDetail {
         cx.notify();
     }
 
-    // Existing entries ------------------------------------------------------
+    // Existing visits -------------------------------------------------------
 
-    pub fn edit_entry(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer.is_none() && self.entry_editor(id).is_some() {
-            return;
-        }
-        if self.has_unsaved_changes(cx) {
-            let id = id.to_string();
-            confirm_then(cx.weak_entity(), window, cx, move |this, window, cx| {
-                this.composer = None;
-                this.editor = None;
-                this.edit_entry(&id, window, cx);
-            });
-            return;
-        }
-        let Some(visit) = self.visits.read(cx).delegate().visit(id).cloned() else {
-            return;
-        };
-        self.select_visit(id, window, cx);
-        let editor = cx.new(|cx| VisitEditor::edit(&visit, window, cx));
-        let visit_id = visit.id.clone();
-        let subscription =
-            cx.subscribe_in(
-                &editor,
-                window,
-                move |this, _, event, window, cx| match event {
-                    VisitEditorEvent::Submit { date, diagnosis } => {
-                        this.update_entry(&visit_id, *date, diagnosis.as_deref(), window, cx)
-                    }
-                    VisitEditorEvent::Cancel => {
-                        this.editor = None;
-                        cx.notify();
-                    }
-                },
-            );
-        editor.update(cx, |editor, cx| editor.focus(window, cx));
-        self.editor = Some((visit.id, editor, subscription));
-        cx.notify();
-    }
-
-    fn update_entry(
+    fn save_visit(
         &mut self,
         id: &str,
+        editor: &Entity<VisitEditor>,
         date: NaiveDate,
         diagnosis: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match self.store.update_visit(id, date, diagnosis) {
-            Ok(_) => {
-                self.editor = None;
+            Ok(visit) => {
+                editor.update(cx, |editor, cx| editor.saved(&visit, cx));
                 self.reload_visits(Some(id), window, cx);
                 window.push_notification(
-                    Notification::success(t("Kunjungan diperbarui", "Visit updated")),
+                    Notification::success(t("Kunjungan disimpan", "Visit saved")),
                     cx,
                 );
                 cx.emit(PatientDetailEvent::Changed);
@@ -2082,25 +2124,8 @@ impl PatientDetail {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let this = cx.weak_entity();
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let this = this.clone();
-            let id = id.clone();
-            alert
-                .title(t("Hapus kunjungan ini?", "Delete this visit?"))
-                .description(t(
-                    "Kunjungan akan dihapus dari riwayat.",
-                    "The visit will be removed from the history.",
-                ))
-                .show_cancel(true)
-                .cancel_text(t("Batal", "Cancel"))
-                .ok_text(t("Hapus", "Delete"))
-                .ok_variant(ButtonVariant::Danger)
-                .on_ok(move |_, window, cx| {
-                    this.update(cx, |detail, cx| detail.delete_entry(&id, window, cx))
-                        .ok();
-                    true
-                })
+        confirm_delete_visit(cx.weak_entity(), window, cx, move |detail, window, cx| {
+            detail.delete_entry(&id, window, cx)
         });
     }
 
@@ -2118,7 +2143,6 @@ impl PatientDetail {
         };
         match self.store.delete_visit(id) {
             Ok(()) => {
-                self.editor = None;
                 self.reload_visits(neighbour.as_deref(), window, cx);
                 window.push_notification(
                     Notification::success(t("Kunjungan dihapus", "Visit deleted")),
@@ -2131,24 +2155,14 @@ impl PatientDetail {
         cx.notify();
     }
 
-    fn print_entry(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn print(&mut self, editor: &Entity<VisitEditor>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(patient) = &self.patient else {
             return;
         };
-        let Some(visit) = self.visits.read(cx).delegate().visit(id) else {
+        let Some(visit) = editor.read(cx).as_shown(&self.patient_id, cx) else {
             return;
         };
-        match diagnosis::write_visit_page(patient, visit) {
-            Ok(path) => cx.open_url(&diagnosis::file_url(&path)),
-            Err(error) => Self::notify_error(
-                window,
-                pick(
-                    format!("Gagal mencetak: {error}"),
-                    format!("Cannot print: {error}"),
-                ),
-                cx,
-            ),
-        }
+        print_visit(patient, &visit, window, cx);
     }
 
     // Profile ---------------------------------------------------------------
@@ -2336,7 +2350,7 @@ impl PatientDetail {
                         .xsmall()
                         .icon(IconName::Plus)
                         .label(t("Kunjungan Baru", "New Visit"))
-                        .disabled(self.composer.is_some())
+                        .disabled(self.composer(cx).is_some())
                         .on_click(
                             cx.listener(|this, _, window, cx| this.open_composer(window, cx)),
                         ),
@@ -2346,80 +2360,18 @@ impl PatientDetail {
     }
 
     fn render_selected(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (scroll_id, content): (SharedString, AnyElement) =
-            if let Some((composer, _)) = &self.composer {
-                (
-                    "patient-new-entry".into(),
-                    v_flex()
-                        .w_full()
-                        .gap_2()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(t("Kunjungan Baru", "New Visit")),
-                        )
-                        .child(composer.clone())
-                        .into_any_element(),
-                )
-            } else if let Some((id, editor, _)) = &self.editor {
-                (
-                    format!("patient-edit-{id}").into(),
-                    editor.clone().into_any_element(),
-                )
-            } else if let Some(visit) = self
-                .selected
-                .as_deref()
-                .and_then(|id| self.visits.read(cx).delegate().visit(id))
-                .cloned()
-            {
-                let action = |name: &str, icon: IconName, tooltip: &'static str| {
-                    Button::new(SharedString::from(format!("{name}-{}", visit.id)))
-                        .icon(icon)
-                        .ghost()
-                        .small()
-                        .tooltip(tooltip)
-                };
-                let (print_id, edit_id, delete_id) =
-                    (visit.id.clone(), visit.id.clone(), visit.id.clone());
-                let actions = [
-                    action("print", IconName::Printer, t("Cetak", "Print"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.print_entry(&print_id, window, cx)
-                        }))
-                        .into_any_element(),
-                    action("edit", IconName::Pencil, t("Ubah", "Edit"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.edit_entry(&edit_id, window, cx)
-                        }))
-                        .into_any_element(),
-                    action("delete", IconName::Trash, t("Hapus", "Delete"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.confirm_delete_entry(delete_id.clone(), window, cx)
-                        }))
-                        .into_any_element(),
-                ];
-                (
-                    format!("patient-visit-scroll-{}", visit.id).into(),
-                    entry_view("patient", &visit, actions, cx).into_any_element(),
-                )
-            } else {
-                return empty_state(
-                    IconName::Calendar,
-                    t("Belum ada kunjungan yang dipilih", "No visit selected"),
-                    t(
-                        "Pilih kunjungan dari daftar, atau tulis kunjungan baru.",
-                        "Choose a visit from the list, or write a new one.",
-                    ),
-                    cx,
-                );
-            };
-
-        div()
-            .id(scroll_id)
-            .size_full()
-            .overflow_y_scrollbar()
-            .child(div().w_full().px_5().py_4().child(content))
-            .into_any_element()
+        match self.editor() {
+            Some(editor) => editor.clone().into_any_element(),
+            None => empty_state(
+                IconName::Calendar,
+                t("Belum ada kunjungan", "No visits yet"),
+                t(
+                    "Tulis yang pertama dengan Kunjungan Baru.",
+                    "Write the first one with New Visit.",
+                ),
+                cx,
+            ),
+        }
     }
 }
 
@@ -2453,93 +2405,88 @@ impl Render for PatientDetail {
 }
 
 // ============================================================================
-// The editor of a visit entry: a date and a Markdown diagnosis.
+// The editor of a visit: its date and its text, always editable, like a
+// document in a text editor. Once something changed, Save (or Cmd/Ctrl-S)
+// stores it and Cancel puts it back.
 // ============================================================================
 
 pub enum VisitEditorEvent {
-    /// `diagnosis` is `None` when an existing entry's text was left as it was.
+    /// Save. `diagnosis` is `None` when the text of a visit was left as it
+    /// was (a visit of the original application then keeps its HTML).
     Submit {
         date: NaiveDate,
         diagnosis: Option<String>,
     },
+    /// The new visit is not wanted.
     Cancel,
+    Print,
+    Delete,
 }
 
 pub struct VisitEditor {
-    id: SharedString,
+    /// The visit edited, `None` for a new one.
+    visit_id: Option<String>,
     date: Entity<DatePickerState>,
     text: Entity<TextareaState>,
-    /// The date and text the editor started with.
-    initial_date: NaiveDate,
-    initial_text: String,
-    /// Editing an existing visit (as opposed to writing a new one).
-    existing: bool,
-    /// The visit was written with the original application.
-    from_html: bool,
-    preview: bool,
+    /// The date and the text as they are stored.
+    saved_date: NaiveDate,
+    saved_text: String,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<VisitEditorEvent> for VisitEditor {}
 
 impl VisitEditor {
-    /// An editor for a new entry, starting from `template`.
-    pub fn new_entry(template: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build(
-            "new-entry".into(),
-            today(),
-            template,
-            false,
-            false,
-            window,
-            cx,
-        )
+    /// A new visit, today, starting from `template`.
+    pub fn new_visit(template: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(None, today(), template, window, cx)
     }
 
-    /// An editor for an existing visit.
-    pub fn edit(visit: &Visit, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// An existing visit.
+    pub fn open(visit: &Visit, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let date = parse_stored(&visit.date).unwrap_or_else(today);
-        let text = diagnosis::editable_markdown(&visit.diagnosis, visit.format);
-        let from_html = visit.format == DiagnosisFormat::Html;
-        Self::build(
-            format!("edit-{}", visit.id).into(),
-            date,
-            text,
-            true,
-            from_html,
-            window,
-            cx,
-        )
+        let text = diagnosis::plain_text(&visit.diagnosis, visit.format);
+        Self::build(Some(visit.id.clone()), date, text, window, cx)
     }
 
     fn build(
-        id: SharedString,
+        visit_id: Option<String>,
         date: NaiveDate,
         text: String,
-        existing: bool,
-        from_html: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let date_state = cx.new(|cx| {
-            let mut state = DatePickerState::new(window, cx).date_format("%Y-%m-%d");
+            let mut state = DatePickerState::new(window, cx).date_format("%d/%m/%Y");
             state.set_date(date, window, cx);
             state
         });
-        let text_state = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .auto_grow(10, 60)
-                .default_value(text.clone())
-        });
+        let text_state = cx.new(|cx| TextareaState::new(window, cx).default_value(text.clone()));
+        // Save and Cancel appear as soon as something changes.
+        let subscriptions = vec![
+            cx.subscribe(&text_state, |_, _, event: &InputEvent, cx| {
+                if let InputEvent::Change = event {
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&date_state, |_, _, _: &DatePickerEvent, cx| cx.notify()),
+        ];
         Self {
-            id,
+            visit_id,
             date: date_state,
             text: text_state,
-            initial_date: date,
-            initial_text: text,
-            existing,
-            from_html,
-            preview: false,
+            saved_date: date,
+            saved_text: text,
+            _subscriptions: subscriptions,
         }
+    }
+
+    pub fn visit_id(&self) -> Option<&str> {
+        self.visit_id.as_deref()
+    }
+
+    pub fn is_new(&self) -> bool {
+        self.visit_id.is_none()
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2547,22 +2494,46 @@ impl VisitEditor {
     }
 
     /// The text being edited.
-    pub fn content(&self, cx: &gpui_kit::App) -> SharedString {
+    pub fn content(&self, cx: &App) -> SharedString {
         self.text.read(cx).value()
     }
 
-    fn text(&self, cx: &Context<Self>) -> String {
-        self.text.read(cx).value().to_string()
+    fn date(&self, cx: &App) -> Option<NaiveDate> {
+        match self.date.read(cx).date() {
+            Date::Single(date) => date,
+            _ => None,
+        }
     }
 
-    /// Whether the date or the text was changed.
+    /// Changes the date, as if it was chosen in the picker.
+    pub fn set_date(&mut self, date: NaiveDate, window: &mut Window, cx: &mut Context<Self>) {
+        self.date
+            .update(cx, |state, cx| state.set_date(date, window, cx));
+        cx.notify();
+    }
+
+    /// Whether the date or the text differs from what is stored.
     pub fn has_changes(&self, cx: &App) -> bool {
-        let same_date = matches!(self.date.read(cx).date(), Date::Single(Some(date)) if date == self.initial_date);
-        !same_date || self.text.read(cx).value().as_ref() != self.initial_text
+        self.date(cx) != Some(self.saved_date)
+            || self.text.read(cx).value().as_ref() != self.saved_text
+    }
+
+    /// The visit as it is shown, saved or not, for printing.
+    pub fn as_shown(&self, patient_id: &str, cx: &App) -> Option<Visit> {
+        Some(Visit {
+            id: self.visit_id.clone()?,
+            patient_id: patient_id.to_string(),
+            date: to_stored(self.date(cx).unwrap_or(self.saved_date)),
+            diagnosis: self.content(cx).to_string(),
+            format: DiagnosisFormat::Text,
+        })
     }
 
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Date::Single(Some(date)) = self.date.read(cx).date() else {
+        if !self.is_new() && !self.has_changes(cx) {
+            return;
+        }
+        let Some(date) = self.date(cx) else {
             window.push_notification(
                 Notification::error(t(
                     "Pilih tanggal kunjungan",
@@ -2572,7 +2543,7 @@ impl VisitEditor {
             );
             return;
         };
-        let text = self.text(cx);
+        let text = self.content(cx).to_string();
         if text.trim().is_empty() {
             window.push_notification(
                 Notification::error(t("Diagnosis belum diisi", "Missing diagnosis")),
@@ -2580,121 +2551,167 @@ impl VisitEditor {
             );
             return;
         }
-        let diagnosis = (!self.existing || text != self.initial_text).then_some(text);
+        let diagnosis = (self.is_new() || text != self.saved_text).then_some(text);
         cx.emit(VisitEditorEvent::Submit { date, diagnosis });
     }
 
-    /// Wraps the selected text in `**`.
-    fn bold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.text.update(cx, |state, cx| {
-            let selected = state.selected_value();
-            let trimmed = selected.trim();
-            if !trimmed.is_empty() {
-                // Keep surrounding spaces outside of the markers.
-                let leading = &selected[..selected.len() - selected.trim_start().len()];
-                let trailing = &selected[selected.trim_end().len()..];
-                state.replace(format!("{leading}**{trimmed}**{trailing}"), window, cx);
-            }
-            state.focus(window, cx);
-        });
+    /// After the visit was stored: what is shown is what is stored.
+    pub fn saved(&mut self, visit: &Visit, cx: &mut Context<Self>) {
+        self.saved_date = parse_stored(&visit.date).unwrap_or(self.saved_date);
+        self.saved_text = self.content(cx).to_string();
+        cx.notify();
     }
 
-    pub fn toggle_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.preview = !self.preview;
-        if !self.preview {
-            self.text.update(cx, |state, cx| state.focus(window, cx));
+    /// Cancel: a new visit is dropped, an existing one goes back to what is
+    /// stored.
+    fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_new() {
+            cx.emit(VisitEditorEvent::Cancel);
+            return;
         }
+        let (date, text) = (self.saved_date, self.saved_text.clone());
+        self.date
+            .update(cx, |state, cx| state.set_date(date, window, cx));
+        self.text
+            .update(cx, |state, cx| state.set_value(text, window, cx));
         cx.notify();
     }
 }
 
 impl Render for VisitEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = if self.preview {
-            let markdown = diagnosis::with_line_breaks(&self.text(cx));
-            div()
-                .w_full()
-                .min_h(px(200.))
-                .px_3()
-                .py_2()
-                .border_1()
-                .border_color(cx.theme().border)
-                .rounded(cx.theme().radius)
-                .child(TextView::markdown(
-                    SharedString::from(format!("{}-preview", self.id)),
-                    markdown,
-                ))
-                .into_any_element()
-        } else {
-            Textarea::new(&self.text).into_any_element()
-        };
-
-        let toolbar = h_flex()
-            .w_full()
-            .gap_1()
-            .child(div().w(px(170.)).child(DatePicker::new(&self.date).small()))
-            .child(div().flex_1())
-            .child(
-                Button::new("bold")
-                    .icon(IconName::Bold)
-                    .ghost()
-                    .small()
-                    .tooltip(t(
-                        "Tebal (mengapit pilihan dengan **)",
-                        "Bold (wraps the selection in **)",
-                    ))
-                    .disabled(self.preview)
-                    .on_click(cx.listener(|this, _, window, cx| this.bold(window, cx))),
+        let changed = self.has_changes(cx);
+        let muted_color = cx.theme().muted_foreground;
+        let when = self.date(cx).map(|date| {
+            format!(
+                "{} · {}",
+                weekday_name(date),
+                format_relative(date, today())
             )
-            .child(
-                Button::new("preview")
-                    .icon(IconName::Eye)
-                    .label(t("Pratinjau", "Preview"))
-                    .ghost()
-                    .small()
-                    .selected(self.preview)
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_preview(window, cx))),
-            );
-
-        let note = self.from_html.then(|| {
-            muted(
-                t(
-                    "Ditulis dengan editor lama dan ditampilkan di sini setelah dikonversi. \
-                     Aslinya tetap disimpan kecuali teksnya diubah.",
-                    "Written with the old editor and shown here converted. \
-                     The original is kept unless you change the text.",
-                ),
-                cx,
-            )
-            .text_sm()
         });
 
-        v_flex()
+        let mut header = h_flex()
             .w_full()
+            .flex_none()
             .gap_2()
-            .child(toolbar)
-            .children(note)
-            .child(body)
+            .px_5()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
             .child(
-                h_flex()
-                    .w_full()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("visit-cancel")
-                            .ghost()
-                            .small()
-                            .label(t("Batal", "Cancel"))
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(VisitEditorEvent::Cancel))),
-                    )
-                    .child(
-                        Button::new("visit-save")
-                            .primary()
-                            .small()
-                            .label(t("Simpan", "Save"))
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
-                    ),
+                div()
+                    .w(px(130.))
+                    .flex_none()
+                    .child(DatePicker::new(&self.date).small()),
             )
+            // Shortened first when the pane is narrow, so the buttons fit.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_sm()
+                    .map(|label| {
+                        if self.is_new() {
+                            label
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(t("Kunjungan baru", "New visit"))
+                        } else {
+                            label.text_color(muted_color).children(when)
+                        }
+                    }),
+            );
+        header = if self.is_new() || changed {
+            header
+                .child(
+                    Button::new("visit-cancel")
+                        .ghost()
+                        .small()
+                        .label(t("Batal", "Cancel"))
+                        .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx))),
+                )
+                .child(
+                    Button::new("visit-save")
+                        .primary()
+                        .small()
+                        .label(t("Simpan", "Save"))
+                        .tooltip(t("Simpan (Cmd/Ctrl-S)", "Save (Cmd/Ctrl-S)"))
+                        .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                )
+        } else {
+            header
+                .child(
+                    Button::new("visit-print")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Printer)
+                        .tooltip(t("Cetak", "Print"))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(VisitEditorEvent::Print))),
+                )
+                .child(
+                    Button::new("visit-delete")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Trash)
+                        .tooltip(t("Hapus kunjungan", "Delete visit"))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(VisitEditorEvent::Delete))),
+                )
+        };
+
+        v_flex()
+            .size_full()
+            .key_context("VisitEditor")
+            .on_action(cx.listener(|this, _: &SaveVisit, window, cx| this.submit(window, cx)))
+            .child(header)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .px_3()
+                    .py_1()
+                    .child(Textarea::new(&self.text).appearance(false).h(relative(1.))),
+            )
+    }
+}
+
+/// Asks before deleting a visit; runs `delete` when the user agrees.
+fn confirm_delete_visit<T: 'static>(
+    this: WeakEntity<T>,
+    window: &mut Window,
+    cx: &mut App,
+    delete: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+) {
+    let delete = Rc::new(delete);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let (this, delete) = (this.clone(), delete.clone());
+        alert
+            .title(t("Hapus kunjungan ini?", "Delete this visit?"))
+            .description(t(
+                "Kunjungan akan dihapus dari riwayat.",
+                "The visit will be removed from the history.",
+            ))
+            .show_cancel(true)
+            .cancel_text(t("Batal", "Cancel"))
+            .ok_text(t("Hapus", "Delete"))
+            .ok_variant(ButtonVariant::Danger)
+            .on_ok(move |_, window, cx| {
+                this.update(cx, |this, cx| delete(this, window, cx)).ok();
+                true
+            })
+    });
+}
+
+/// Opens the printable page of a visit in the browser.
+fn print_visit(patient: &Patient, visit: &Visit, window: &mut Window, cx: &mut App) {
+    match diagnosis::write_visit_page(patient, visit) {
+        Ok(path) => cx.open_url(&diagnosis::file_url(&path)),
+        Err(error) => window.push_notification(
+            Notification::error(pick(
+                format!("Gagal mencetak: {error}"),
+                format!("Cannot print: {error}"),
+            )),
+            cx,
+        ),
     }
 }
 
@@ -2842,56 +2859,13 @@ impl Render for ProfileForm {
 }
 
 // ============================================================================
-// How a visit entry is displayed.
-// ============================================================================
-
-/// A visit as a journal entry: its date, actions, and the rendered text.
-/// `scope` keeps the rendered text of the same visit in two views apart.
-pub fn entry_view(
-    scope: &str,
-    visit: &Visit,
-    actions: impl IntoIterator<Item = AnyElement>,
-    cx: &App,
-) -> Div {
-    let today = today();
-    let (title, relative) = match parse_stored(&visit.date) {
-        Some(date) => (format_with_weekday(date), format_relative(date, today)),
-        None => (visit.date.clone(), String::new()),
-    };
-    let text_id = SharedString::from(format!("{scope}-visit-{}", visit.id));
-    let body = match visit.format {
-        DiagnosisFormat::Html => TextView::html(text_id, visit.diagnosis.clone()),
-        DiagnosisFormat::Markdown => {
-            TextView::markdown(text_id, diagnosis::with_line_breaks(&visit.diagnosis))
-        }
-    };
-
-    v_flex()
-        .w_full()
-        .gap_2()
-        .child(
-            h_flex()
-                .w_full()
-                .gap_2()
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(relative),
-                )
-                .child(div().flex_1())
-                .children(actions),
-        )
-        .child(div().w_full().child(body))
-}
-
-// ============================================================================
 // The Visits section: every visit of every patient, newest first.
 // ============================================================================
 
 pub enum VisitsEvent {
     OpenPatient(String),
+    /// A visit was saved or deleted: views of the patients are stale.
+    Changed,
 }
 
 /// The visits of one day.
@@ -3086,10 +3060,17 @@ impl ListDelegate for VisitList {
     }
 }
 
-/// The selected visit, with its patient.
+/// The selected visit: its patient and its editor.
 struct Selected {
-    visit: Visit,
     patient: Patient,
+    editor: Entity<VisitEditor>,
+    _subscription: Subscription,
+}
+
+impl Selected {
+    fn visit_id(&self, cx: &App) -> Option<String> {
+        self.editor.read(cx).visit_id().map(str::to_string)
+    }
 }
 
 pub struct VisitsView {
@@ -3122,7 +3103,7 @@ impl VisitsView {
                 ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
                     let id = list.read(cx).delegate().visit(*ix).map(|v| v.id.clone());
                     if let Some(id) = id {
-                        this.show_visit(&id, window, cx);
+                        this.request_visit(&id, window, cx);
                     }
                 }
                 ListEvent::Cancel => {}
@@ -3152,14 +3133,29 @@ impl VisitsView {
         self.list.update(cx, |list, cx| list.focus(window, cx));
     }
 
-    /// Reloads the list, after visits changed elsewhere.
+    /// Whether the visit shown was changed and not saved.
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        self.selected
+            .as_ref()
+            .is_some_and(|selected| selected.editor.read(cx).has_changes(cx))
+    }
+
+    /// The editor of the visit shown.
+    pub fn editor(&self) -> Option<&Entity<VisitEditor>> {
+        self.selected.as_ref().map(|selected| &selected.editor)
+    }
+
+    /// Reloads the list after visits changed elsewhere, keeping text that is
+    /// being written.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.list.update(cx, |list, cx| {
             list.delegate_mut().reload();
             cx.notify();
         });
-        // The selected visit may have changed or been deleted.
-        if let Some(id) = self.selected.as_ref().map(|s| s.visit.id.clone()) {
+        if !self.has_unsaved_changes(cx)
+            && let Some(id) = self.selected.as_ref().and_then(|s| s.visit_id(cx))
+        {
+            // The visit may have changed or been deleted.
             self.selected = None;
             self.show_visit(&id, window, cx);
         }
@@ -3186,6 +3182,25 @@ impl VisitsView {
         cx.notify();
     }
 
+    /// Shows the visit chosen in the list, asking first when that would lose
+    /// changes that are not saved.
+    fn request_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.selected.as_ref().and_then(|s| s.visit_id(cx));
+        if shown.as_deref() == Some(id) {
+            return;
+        }
+        if self.has_unsaved_changes(cx) {
+            self.reselect(window, cx);
+            let id = id.to_string();
+            confirm_then(cx.weak_entity(), window, cx, move |this, window, cx| {
+                this.show_visit(&id, window, cx)
+            });
+            return;
+        }
+        self.show_visit(id, window, cx);
+    }
+
+    /// Shows a visit with its patient, dropping changes that are not saved.
     pub fn show_visit(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let loaded = self.store.get_visit(id).and_then(|visit| {
             let patient = match &visit {
@@ -3195,9 +3210,36 @@ impl VisitsView {
             Ok(visit.zip(patient))
         });
         match loaded {
-            Ok(selected) => {
-                self.selected = selected.map(|(visit, patient)| Selected { visit, patient });
+            Ok(Some((visit, patient))) => {
+                let editor = cx.new(|cx| VisitEditor::open(&visit, window, cx));
+                let subscription =
+                    cx.subscribe_in(&editor, window, |this, editor, event, window, cx| {
+                        let Some(id) = editor.read(cx).visit_id().map(str::to_string) else {
+                            return;
+                        };
+                        match event {
+                            VisitEditorEvent::Submit { date, diagnosis } => {
+                                this.save(&id, editor, *date, diagnosis.as_deref(), window, cx)
+                            }
+                            VisitEditorEvent::Print => this.print(window, cx),
+                            VisitEditorEvent::Delete => {
+                                confirm_delete_visit(
+                                    cx.weak_entity(),
+                                    window,
+                                    cx,
+                                    move |this, window, cx| this.delete(&id, window, cx),
+                                );
+                            }
+                            VisitEditorEvent::Cancel => {}
+                        }
+                    });
+                self.selected = Some(Selected {
+                    patient,
+                    editor,
+                    _subscription: subscription,
+                });
             }
+            Ok(None) => self.selected = None,
             Err(error) => window.push_notification(Notification::error(error.to_string()), cx),
         }
         // Keep the list's highlight on the visit shown.
@@ -3206,26 +3248,67 @@ impl VisitsView {
     }
 
     fn reselect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let selected = self.selected.as_ref().map(|s| s.visit.id.clone());
+        let selected = self.selected.as_ref().and_then(|s| s.visit_id(cx));
         self.list.update(cx, |list, cx| {
             let ix = selected.and_then(|id| list.delegate().position(&id));
             list.set_selected_index(ix, window, cx);
         });
     }
 
+    fn save(
+        &mut self,
+        id: &str,
+        editor: &Entity<VisitEditor>,
+        date: NaiveDate,
+        diagnosis: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.store.update_visit(id, date, diagnosis) {
+            Ok(visit) => {
+                editor.update(cx, |editor, cx| editor.saved(&visit, cx));
+                self.list.update(cx, |list, cx| {
+                    list.delegate_mut().reload();
+                    cx.notify();
+                });
+                self.reselect(window, cx);
+                window.push_notification(
+                    Notification::success(t("Kunjungan disimpan", "Visit saved")),
+                    cx,
+                );
+                cx.emit(VisitsEvent::Changed);
+            }
+            Err(error) => window.push_notification(Notification::error(error.to_string()), cx),
+        }
+        cx.notify();
+    }
+
+    fn delete(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match self.store.delete_visit(id) {
+            Ok(()) => {
+                self.selected = None;
+                self.list.update(cx, |list, cx| {
+                    list.delegate_mut().reload();
+                    cx.notify();
+                });
+                self.reselect(window, cx);
+                window.push_notification(
+                    Notification::success(t("Kunjungan dihapus", "Visit deleted")),
+                    cx,
+                );
+                cx.emit(VisitsEvent::Changed);
+            }
+            Err(error) => window.push_notification(Notification::error(error.to_string()), cx),
+        }
+        cx.notify();
+    }
+
     fn print(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(selected) = &self.selected else {
             return;
         };
-        match diagnosis::write_visit_page(&selected.patient, &selected.visit) {
-            Ok(path) => cx.open_url(&diagnosis::file_url(&path)),
-            Err(error) => window.push_notification(
-                Notification::error(pick(
-                    format!("Gagal mencetak: {error}"),
-                    format!("Cannot print: {error}"),
-                )),
-                cx,
-            ),
+        if let Some(visit) = selected.editor.read(cx).as_shown(&selected.patient.id, cx) {
+            print_visit(&selected.patient, &visit, window, cx);
         }
     }
 
@@ -3320,14 +3403,6 @@ impl VisitsView {
                             ),
                     )
                     .child(
-                        Button::new("print-visit")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Printer)
-                            .tooltip(t("Cetak", "Print"))
-                            .on_click(cx.listener(|this, _, window, cx| this.print(window, cx))),
-                    )
-                    .child(
                         Button::new("open-patient")
                             .small()
                             .icon(IconName::User)
@@ -3337,23 +3412,7 @@ impl VisitsView {
                             })),
                     ),
             )
-            .child(
-                div()
-                    .id(SharedString::from(format!(
-                        "visit-scroll-{}",
-                        selected.visit.id
-                    )))
-                    .flex_1()
-                    .min_h(px(0.))
-                    .w_full()
-                    .overflow_y_scrollbar()
-                    .child(div().px_5().py_4().child(entry_view(
-                        "visits",
-                        &selected.visit,
-                        [],
-                        cx,
-                    ))),
-            )
+            .child(div().flex_1().min_h(px(0.)).child(selected.editor.clone()))
             .into_any_element()
     }
 }
@@ -3465,104 +3524,65 @@ impl SettingsView {
         let text = self.text(cx);
         let changed = text != self.saved;
         let is_default = text == TEMPLATE;
-        let column_title = |title: &'static str| {
-            div()
-                .text_sm()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(cx.theme().muted_foreground)
-                .child(title)
-        };
-
-        GroupBox::new().fill().title(t("Templat kunjungan baru", "New visit template")).child(
-            v_flex()
-                .w_full()
-                .gap_3()
-                .child(
-                    muted(
-                        t(
-                            "Setiap kunjungan baru dimulai dengan teks ini. Ditulis dalam Markdown: \
-                             **tebal**, \"- \" untuk poin, \"1. \" untuk butir bernomor, \
-                             \"##### \" untuk judul. Kunjungan yang sudah ditulis tidak berubah.",
-                            "Every new visit starts with this text. It is written in Markdown: \
-                             **bold**, \"- \" for a bullet, \"1. \" for a numbered item, \
-                             \"##### \" for a heading. Visits already written do not change.",
-                        ),
-                        cx,
+        GroupBox::new()
+            .fill()
+            .title(t("Templat kunjungan baru", "New visit template"))
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_3()
+                    .child(
+                        muted(
+                            t(
+                                "Setiap kunjungan baru dimulai dengan teks ini. \
+                             Kunjungan yang sudah ditulis tidak berubah.",
+                                "Every new visit starts with this text. \
+                             Visits already written do not change.",
+                            ),
+                            cx,
+                        )
+                        .text_sm(),
                     )
-                    .text_sm(),
-                )
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_start()
-                        .gap_4()
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .gap_1()
-                                .child(column_title("Markdown"))
-                                .child(Textarea::new(&self.template)),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .gap_1()
-                                .child(column_title(t("Pratinjau", "Preview")))
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .px_3()
-                                        .py_2()
-                                        .border_1()
-                                        .border_color(cx.theme().border)
-                                        .rounded(cx.theme().radius)
-                                        .bg(cx.theme().background)
-                                        .child(TextView::markdown(
-                                            "template-preview",
-                                            diagnosis::with_line_breaks(&text),
-                                        )),
-                                ),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .w_full()
-                        .gap_2()
-                        .child(
-                            Button::new("template-default")
-                                .ghost()
-                                .small()
-                                .icon(IconName::RotateCcw)
-                                .label(t("Kembalikan ke Bawaan", "Reset to Default"))
-                                .disabled(is_default)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.set_text(TEMPLATE, window, cx)
-                                })),
-                        )
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("template-discard")
-                                .ghost()
-                                .small()
-                                .label(t("Buang Perubahan", "Discard Changes"))
-                                .disabled(!changed)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    let saved = this.saved.clone();
-                                    this.set_text(&saved, window, cx)
-                                })),
-                        )
-                        .child(
-                            Button::new("template-save")
-                                .primary()
-                                .small()
-                                .label(t("Simpan", "Save"))
-                                .disabled(!changed)
-                                .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
-                        ),
-                ),
-        )
+                    .child(Textarea::new(&self.template))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap_2()
+                            .child(
+                                Button::new("template-default")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::RotateCcw)
+                                    .label(t("Kembalikan ke Bawaan", "Reset to Default"))
+                                    .disabled(is_default)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.set_text(TEMPLATE, window, cx)
+                                    })),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("template-discard")
+                                    .ghost()
+                                    .small()
+                                    .label(t("Buang Perubahan", "Discard Changes"))
+                                    .disabled(!changed)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let saved = this.saved.clone();
+                                        this.set_text(&saved, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("template-save")
+                                    .primary()
+                                    .small()
+                                    .label(t("Simpan", "Save"))
+                                    .disabled(!changed)
+                                    .on_click(
+                                        cx.listener(|this, _, window, cx| this.save(window, cx)),
+                                    ),
+                            ),
+                    ),
+            )
     }
 
     // Backup, restore, export -------------------------------------------
@@ -3989,9 +4009,8 @@ macro_rules! extra_icons {
     };
 }
 
-const EXTRA_ICONS: [(&str, &[u8]); 11] = extra_icons!(
+const EXTRA_ICONS: [(&str, &[u8]); 10] = extra_icons!(
     "arrow-down-a-z",
-    "bold",
     "clock",
     "database",
     "pencil",
@@ -4034,13 +4053,11 @@ mod assets_tests {
     fn serves_the_icons_the_interface_uses() {
         for icon in [
             IconName::ArrowDownAZ,
-            IconName::Bold,
             IconName::Calendar,
             IconName::Clock,
             IconName::Database,
             IconName::FolderOpen,
             IconName::Close,
-            IconName::Eye,
             IconName::Inbox,
             IconName::Pencil,
             IconName::Plus,
