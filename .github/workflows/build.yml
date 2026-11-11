@@ -1,7 +1,7 @@
 name: Build
 
-# Builds Kutilang for Linux, Windows and macOS on every push. The binaries
-# are attached to the run (the run's page in the Actions tab, "Artifacts").
+# Builds Kutilang for Linux, Windows and macOS on every push. The files are
+# attached to the run (the run's page in the Actions tab, "Artifacts").
 # Pushing a tag such as `v2.0.0` also publishes them as a GitHub release.
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
     # with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36...).
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install the system libraries GPUI builds against
         run: |
           sudo apt-get update
@@ -32,7 +32,7 @@ jobs:
             pkg-config libfontconfig1-dev libfreetype-dev libwayland-dev \
             libx11-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
       - name: Test
         run: cargo test --locked
       - name: Build
@@ -43,10 +43,11 @@ jobs:
           cp target/release/kutilang dist/kutilang/kutilang
           cp README.md dist/kutilang/
           tar -C dist -czf kutilang-linux-x86_64.tar.gz kutilang
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: kutilang-linux-x86_64
           path: kutilang-linux-x86_64.tar.gz
+          # Uploaded as is, so the download is this file, not a zip of it.
+          archive: false
 
   windows:
     name: Windows (x86_64)
@@ -56,9 +57,9 @@ jobs:
       # the Visual C++ redistributable.
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
       - name: Build
         run: cargo build --release --locked
       - name: Package
@@ -68,10 +69,11 @@ jobs:
           Copy-Item target/release/kutilang.exe dist/kutilang.exe
           Copy-Item README.md dist/
           Compress-Archive -Path dist/* -DestinationPath kutilang-windows-x86_64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: kutilang-windows-x86_64
           path: kutilang-windows-x86_64.zip
+          # Uploaded as is, so the download is this file, not a zip of it.
+          archive: false
 
   macos:
     name: macOS (Apple silicon and Intel)
@@ -79,11 +81,11 @@ jobs:
     # Both architectures are built on it, whatever its own.
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
       - name: Build for Apple silicon
         run: cargo build --release --locked --target aarch64-apple-darwin
       - name: Build for Intel
@@ -94,10 +96,11 @@ jobs:
             target/aarch64-apple-darwin/release/kutilang \
             target/x86_64-apple-darwin/release/kutilang
           scripts/package-macos.sh kutilang kutilang-macos.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: kutilang-macos
           path: kutilang-macos.zip
+          # Uploaded as is, so the download is this file, not a zip of it.
+          archive: false
 
   release:
     name: Release
@@ -107,11 +110,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+          # The files are the archives themselves: keep them as they are.
+          skip-decompress: true
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           # `v2.1.0-rc1` and the like are marked as pre-releases.
