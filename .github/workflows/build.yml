@@ -75,7 +75,9 @@ jobs:
 
   macos:
     name: macOS (Apple silicon and Intel)
-    runs-on: macos-14
+    # Named versions are retired over time; the latest is always available.
+    # Both architectures are built on it, whatever its own.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
