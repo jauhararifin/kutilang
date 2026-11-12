@@ -1,0 +1,40 @@
+[package]
+name = "kutilangv2"
+version = "2.0.0"
+edition = "2024"
+description = "Kutilang medical records, rewritten in Rust with GPUI"
+publish = false
+
+# The program is `kutilang`; the library keeps the package's name.
+[[bin]]
+name = "kutilang"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+dirs = "6.0.0"
+gpui-kit = "0.9.0"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+rust_xlsxwriter = { version = "0.102.0", default-features = false }
+tempfile = "3"
+uuid = { version = "1.29.2", features = ["v4"] }
+
+# The Windows executable's icon (build.rs), built on Windows only.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+# `test-support` provides `Window::render_to_image`, used by examples/screenshot.rs.
+gpui-kit = { version = "0.9.0", features = ["test-support"] }
+# test-support pulls in proptest; 1.12 needs a rand_xorshift that is only a
+# pre-release on crates.io, so the resolver must stay on 1.11.
+proptest = "<1.12"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# A full HTML parser, to check the text of every old visit in tests/store.rs.
+html5ever = "0.27"
+markup5ever_rcdom = "0.3.0"
+
+[profile.release]
+# Smaller downloads: the symbols are only needed for debugging.
+strip = true
